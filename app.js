@@ -14,7 +14,7 @@ const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7
 
 // ⚠️ COPIA AQUÍ EL LINK DE IMPLEMENTACIÓN DE TU GOOGLE APPS SCRIPT (APLICACIÓN WEB /EXEC)
 // Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con Gemini.
-const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbyEhoazzBzBU8_NyMns66pZe6F17vahsb4LROK-idmFTer1cfrKX5cP7AREuaSZXvWY/exec";
+const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbwzHDst8amywsOkD8Ki8OFhI074nDhLu1Tvp2AF1o1S8Pw_DlyOAPIfJW-TZzFPauU/exec";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -595,6 +595,23 @@ function buscarEventoPorNombreParcial(consulta) {
   });
 }
 
+// Palabras que indican que el residente quiere DATOS operativos del evento (cupo,
+// horario, lugar, registro) — sin al menos una de estas, aunque mencione el nombre
+// del evento, es más probable que sea una pregunta de conocimiento general (ej. "¿cómo
+// se juega waterpolo?") y conviene dejarla pasar a la IA en vez de mostrar la tarjeta.
+const PALABRAS_INTENCION_OPERATIVA = [
+  "cupo", "cupos", "espacio", "espacios", "lugar", "lugares", "disponible", "disponibles",
+  "fecha", "hora", "horario", "dia", "dias", "cuando", "donde", "ubicacion",
+  "registrar", "registro", "registrarme", "apuntar", "apuntarme", "inscribir", "inscripcion",
+  "costo", "precio", "gratis", "info", "informacion", "detalle", "detalles", "reserva", "reservar",
+  "lleno", "queda", "quedan", "hay sitio"
+];
+
+function tieneIntencionOperativa(texto) {
+  const n = normalizarTexto(texto);
+  return PALABRAS_INTENCION_OPERATIVA.some(p => n.includes(p));
+}
+
 // ---------- Flujo de registro conversacional ----------
 window.iniciarRegistro = function(eventoId, categoria, nombreEvento, fechaSesion) {
   const evento = buscarEventoPorId(eventoId, categoria);
@@ -910,6 +927,15 @@ function responderMensajeLocal(textoOriginal) {
   const texto = textoOriginal.trim();
   const normalizado = texto.toLowerCase();
 
+  // Prioridad 1: si menciona un evento específico con intención operativa (cupo,
+  // horario, días, etc.), responde con ESE evento — antes que cualquier trigger
+  // genérico. Así "qué días hay Ping Pong" no dispara toda la agenda semanal solo
+  // porque la frase natural para preguntarlo incluye la palabra "semana"/"días".
+  const candidatos = buscarEventoPorNombreParcial(texto);
+  if (candidatos.length > 0 && tieneIntencionOperativa(texto)) {
+    return candidatos.map(ev => tarjetaEventoTexto(ev)).join("\n\n");
+  }
+
   if (normalizado.includes("hoy")) return respuestaEventosHoy();
   if (normalizado.includes("semana") || normalizado.includes("agenda") || normalizado.includes("programaci")) return respuestaAgendaSemanal();
 
@@ -920,10 +946,7 @@ function responderMensajeLocal(textoOriginal) {
     return "👋 ¡Hola! Puedo mostrarte los eventos de hoy, la programación de la semana, ayudarte a registrarte a cualquier evento, decirte si ya tienes una reserva (\"¿tengo reserva en waterpolo?\"), listar todos tus registros (\"mis registros\") o cancelar uno (\"quiero cancelar mi registro\").";
   }
 
-  const candidatos = buscarEventoPorNombreParcial(texto);
-  if (candidatos.length > 0) return candidatos.map(ev => tarjetaEventoTexto(ev)).join("\n\n");
-
-  return null; // sin match local -> se consulta a la IA
+  return null; // sin match local (o mención del evento sin intención operativa) -> se consulta a la IA
 }
 
 async function preguntarIA(pregunta) {
