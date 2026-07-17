@@ -16,6 +16,7 @@ const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7
 // Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con Gemini.
 const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbybUiBe_L9yX1wM4o7j8rfjUi73sUIEc0LLDZmIc9oZmi7RoAae1h6dfVEtupdWv39D/exec";
 
+
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 const DIAS_SEMANA_CORTOS = ["D","L","M","M","J","V","S"];
@@ -56,6 +57,7 @@ let DATA = {
 
 // Estado de la conversación de registro en curso (flujo 100% en el chat)
 let registroEnCurso = null; // { eventoId, categoria, nombreEvento, fechaSesion, esRecurrente, paso: 'depto'|'nombre'|'dias', depto, nombreAsistente }
+let consultaEnCurso = null; // { tipo: 'consultar'|'cancelar', nombreFiltro, paso: 'depto' }
 
 const messagesEl = document.getElementById("messages");
 const chatForm = document.getElementById("chatForm");
@@ -548,8 +550,8 @@ function respuestaAgendaSemanal() {
 }
 
 function buscarEventoPorNombreParcial(consulta) {
-  const q = consulta.toLowerCase().trim();
-  return todosLosEventos().filter(e => e.nombre && e.nombre.toLowerCase().includes(q));
+  const q = normalizarTexto(consulta);
+  return todosLosEventos().filter(e => e.nombre && q.includes(normalizarTexto(e.nombre)));
 }
 
 // ---------- Flujo de registro conversacional ----------
@@ -727,6 +729,141 @@ function refrescarRegistrosYCupos() {
   refrescarCuposLive();
 }
 
+// ---------- Autoservicio: "¿tengo reserva?" / "mis registros" / cancelar los propios ----------
+function detectarIntentCancelarPropio(texto) {
+  const n = normalizarTexto(texto);
+  return /cancelar mi (registro|reserva|inscripcion)|quiero cancelar|dar de baja mi registro/.test(n);
+}
+
+function detectarIntentConsultarPropio(texto) {
+  const n = normalizarTexto(texto);
+  return /tengo reserva|ya tengo registro|estoy registrado|estoy inscrito|apuntado a|confirmas mi registro|confirmar mi (registro|reserva)|mis registros|mis eventos|mis reservas|a que estoy apuntado/.test(n);
+}
+
+// Intenta reconocer el nombre de un evento activo mencionado dentro del texto libre
+function extraerNombreEventoDeTexto(texto) {
+  const n = normalizarTexto(texto);
+  const match = todosLosEventos().find(ev => ev.nombre && n.includes(normalizarTexto(ev.nombre)));
+  return match ? match.nombre : null;
+}
+
+function iniciarConsultaPropia(tipo, nombreFiltro) {
+  consultaEnCurso = { tipo, nombreFiltro, paso: "depto" };
+  const intro = tipo === "cancelar"
+    ? (nombreFiltro ? `Vamos a cancelar tu registro a *${nombreFiltro}*.` : `Vamos a revisar tus registros para que elijas cuál cancelar.`)
+    : (nombreFiltro ? `Voy a revisar si tienes reserva en *${nombreFiltro}*.` : `Voy a revisar tus registros.`);
+  addMessage(`${intro}\n\nPor favor indica tu número de departamento (ej. 3003). Escribe *cancelar* para salir.`, "bot");
+  if (chatInput) chatInput.focus();
+}
+
+async function continuarConsultaPropia(texto) {
+  const txt = texto.trim();
+  if (txt.toLowerCase() === "cancelar") {
+    consultaEnCurso = null;
+    addMessage("Consulta cancelada.", "bot");
+    return;
+  }
+  if (consultaEnCurso.paso === "depto") {
+    if (!/^[0-9]{2,5}$/.test(txt)) {
+      addMessage("Ese número de departamento no parece válido. Escríbelo solo con números (ej. 3003), o escribe *cancelar*.", "bot");
+      return;
+    }
+    consultaEnCurso.depto = txt;
+    const { tipo, nombreFiltro, depto } = consultaEnCurso;
+    consultaEnCurso = null;
+    await ejecutarConsultaPropia(tipo, nombreFiltro, depto);
+  }
+}
+
+async function ejecutarConsultaPropia(tipo, nombreFiltro, depto) {
+  addMessage(`Buscando registros del depto ${depto}…`, "bot");
+  try {
+    const url = `${URL_AGENTE_EVENTOS}?accion=mis_registros&depto=${encodeURIComponent(depto)}`;
+    const res = await fetch(url, { method: "GET", cache: "no-store" });
+    const data = await res.json();
+    if (!data.ok) {
+      addMessage(`⚠️ ${data.error || "No se pudo consultar tus registros."}`, "bot");
+      return;
+    }
+    let registros = data.registros || [];
+    if (nombreFiltro) {
+      const nf = normalizarTexto(nombreFiltro);
+      registros = registros.filter(r => normalizarTexto(r.nombreEvento).includes(nf));
+    }
+    if (tipo === "consultar") mostrarResultadoConsultaPropia(depto, nombreFiltro, registros);
+    else mostrarOpcionesCancelacionPropia(depto, nombreFiltro, registros);
+  } catch (e) {
+    console.error("Error consultando mis_registros:", e);
+    addMessage("⚠️ Error de conexión al consultar tus registros.", "bot");
+  }
+}
+
+function mostrarResultadoConsultaPropia(depto, nombreFiltro, registros) {
+  if (!registros.length) {
+    const msg = nombreFiltro
+      ? `❌ El departamento ${depto} no tiene registro confirmado en *${nombreFiltro}*.`
+      : `El departamento ${depto} no tiene registros futuros confirmados en ningún evento.`;
+    addMessage(msg, "bot");
+    return;
+  }
+  const porEvento = {};
+  registros.forEach(r => { (porEvento[r.nombreEvento] = porEvento[r.nombreEvento] || []).push(r); });
+
+  let msg = `✅ El departamento ${depto} tiene ${registros.length} registro(s) confirmado(s):\n\n`;
+  Object.keys(porEvento).forEach(nombre => {
+    const filas = porEvento[nombre];
+    const fechas = filas.map(f => formatearFecha(parseFechaLocal(f.fechaSesion))).join(", ");
+    msg += `📌 *${nombre}* — ${filas.length} sesión(es): ${fechas}\n`;
+  });
+  addMessage(msg.trim(), "bot");
+}
+
+function mostrarOpcionesCancelacionPropia(depto, nombreFiltro, registros) {
+  if (!registros.length) {
+    const msg = nombreFiltro
+      ? `No encontré ningún registro confirmado del depto ${depto} en *${nombreFiltro}* para cancelar.`
+      : `No encontré registros futuros confirmados del depto ${depto} para cancelar.`;
+    addMessage(msg, "bot");
+    return;
+  }
+
+  let msg = `Estos son los registros confirmados del depto ${depto}${nombreFiltro ? ` en *${nombreFiltro}*` : ""}:\n\n`;
+  registros.forEach(r => {
+    const fechaTxt = formatearFecha(parseFechaLocal(r.fechaSesion));
+    const nombreEscapado = escapeHtml(r.nombreEvento).replace(/'/g, "\\'");
+    msg += `📌 *${r.nombreEvento}* — ${fechaTxt}\n`;
+    msg += `<button onclick="window.cancelarMiRegistroDesdeChat('${depto}','${r.registroId}','${nombreEscapado}','${r.fechaSesion}')" class="mt-0.5 mb-1.5 inline-block text-[11px] font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg px-2 py-1 transition">🗑️ Cancelar esta sesión</button>\n`;
+  });
+
+  if (registros.length > 1) {
+    const idsList = registros.map(r => r.registroId).join(",");
+    const etiquetaTodas = nombreFiltro ? escapeHtml(nombreFiltro) : "todos los registros listados";
+    msg += `\n<button onclick="window.cancelarMiRegistroDesdeChat('${depto}','${idsList}','${etiquetaTodas}', null)" class="mt-1 block text-[11px] font-bold text-white bg-red-800 hover:bg-red-900 rounded-lg px-3 py-1.5 transition">🗑️ Cancelar TODAS estas (${registros.length})</button>`;
+  }
+
+  addMessage(msg.trim(), "bot");
+}
+
+window.cancelarMiRegistroDesdeChat = async function(depto, registroIdsCsv, etiqueta, fecha) {
+  const detalleFecha = fecha ? ` (${formatearFecha(parseFechaLocal(fecha))})` : "";
+  addMessage(`Cancelando *${etiqueta}*${detalleFecha}…`, "bot");
+  try {
+    const url = `${URL_AGENTE_EVENTOS}?accion=cancelar_mi_registro&depto=${encodeURIComponent(depto)}&registroIds=${encodeURIComponent(registroIdsCsv)}`;
+    const res = await fetch(url, { method: "GET", cache: "no-store" });
+    const data = await res.json();
+    if (data.ok && data.totalCanceladas > 0) {
+      addMessage(`✅ Se canceló(aron) ${data.totalCanceladas} registro(s) del depto ${depto}. El cupo queda liberado.`, "bot");
+      renderSidebarEventos();
+      refrescarRegistrosYCupos();
+    } else {
+      addMessage(`⚠️ ${data.error || "No se pudo cancelar (puede que ya estuviera cancelado)."}`, "bot");
+    }
+  } catch (e) {
+    console.error("Error cancelando mi registro:", e);
+    addMessage("⚠️ Error de conexión al cancelar tu registro.", "bot");
+  }
+};
+
 // ---------- Router de mensajes ----------
 function responderMensajeLocal(textoOriginal) {
   const texto = textoOriginal.trim();
@@ -735,7 +872,7 @@ function responderMensajeLocal(textoOriginal) {
   if (normalizado.includes("hoy")) return respuestaEventosHoy();
   if (normalizado.includes("semana") || normalizado.includes("agenda") || normalizado.includes("programaci")) return respuestaAgendaSemanal();
   if (normalizado.includes("ayuda") || normalizado === "hola") {
-    return "👋 ¡Hola! Puedo mostrarte los eventos de hoy, la programación de la semana, o ayudarte a registrarte a cualquier evento activo directamente aquí en el chat.";
+    return "👋 ¡Hola! Puedo mostrarte los eventos de hoy, la programación de la semana, ayudarte a registrarte a cualquier evento, decirte si ya tienes una reserva (\"¿tengo reserva en waterpolo?\"), listar todos tus registros (\"mis registros\") o cancelar uno (\"quiero cancelar mi registro\").";
   }
 
   const candidatos = buscarEventoPorNombreParcial(texto);
@@ -771,6 +908,22 @@ if (chatForm) {
     // Si hay un registro en curso, el siguiente mensaje se interpreta como parte de ese flujo
     if (registroEnCurso) {
       await continuarFlujoRegistro(txt);
+      return;
+    }
+
+    // Si hay una consulta de "mis registros" / "cancelar mi registro" en curso
+    if (consultaEnCurso) {
+      await continuarConsultaPropia(txt);
+      return;
+    }
+
+    // Detecta intención de autoservicio ANTES del router normal y de la IA
+    if (detectarIntentCancelarPropio(txt)) {
+      iniciarConsultaPropia("cancelar", extraerNombreEventoDeTexto(txt));
+      return;
+    }
+    if (detectarIntentConsultarPropio(txt)) {
+      iniciarConsultaPropia("consultar", extraerNombreEventoDeTexto(txt));
       return;
     }
 
@@ -1405,4 +1558,4 @@ window.irMesActualCalendario = function() {
 
 inicializar();
 setInterval(inicializar, 60000); // refresca eventos completos cada 60s
-setInterval(refrescarCuposLive, 12000); // refresca SOLO el cupo cada 12s (llamada liviana, sin caché)c
+setInterval(refrescarCuposLive, 12000); // refresca SOLO el cupo cada 12s (llamada liviana, sin caché)
