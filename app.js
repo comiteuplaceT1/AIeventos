@@ -21,6 +21,18 @@ const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","
 const DIAS_SEMANA_CORTOS = ["D","L","M","M","J","V","S"];
 const DIAS_SEMANA_LARGOS = ["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"];
 
+// ⚠️ AJUSTA esta lista con los valores exactos de tus áreas/amenidades — se usa
+// como selector de "Ubicación" al crear un evento desde el Panel del Comité.
+const UBICACIONES = [
+  "Alberca P6",
+  "Jardín Asadores P6",
+  "Salón Yoga P6",
+  "Coffee Place PB",
+  "Skylounge P31",
+  "Terraza P31",
+  "Skylounge P31"
+];
+
 const CATEGORIAS = {
   "Deportivos": { emoji: "🏀", colorClaro: "bg-emerald-100 text-emerald-700 hover:bg-emerald-200", colorDia: "bg-emerald-50 border-emerald-200", labelSidebar: "EVENTOS DEPORTIVOS" },
   "Sociales":   { emoji: "🎉", colorClaro: "bg-purple-100 text-purple-700 hover:bg-purple-200", colorDia: "bg-purple-50 border-purple-200", labelSidebar: "EVENTOS SOCIALES" },
@@ -337,15 +349,6 @@ function respuestaEventosHoy() {
   return reporte;
 }
 
-function respuestaTodosActivos() {
-  const eventos = todosLosEventos().filter(e => e.estado.toLowerCase() === "activo")
-    .sort((a, b) => parseFechaLocal(a.fecha) - parseFechaLocal(b.fecha));
-  if (!eventos.length) return "📋 No hay eventos activos registrados en este momento.";
-  let reporte = "🗓️ *TODOS LOS EVENTOS ACTIVOS*\n\n";
-  eventos.forEach(ev => { reporte += tarjetaEventoTexto(ev) + "\n\n"; });
-  return reporte;
-}
-
 function respuestaAgendaSemanal() {
   const lunes = inicioSemana(new Date());
   const dias = [];
@@ -441,7 +444,9 @@ async function confirmarRegistroBackend(eventoId, categoria, depto, nombre) {
     }
 
     if (data.ok) {
-      addMessage(`✅ *${data.mensaje}*\n\n👥 Cupo actualizado: ${data.cupoActual}/${data.cupoTotal} — ${data.lugaresDisponibles} lugar(es) disponible(s).`, "bot");
+      let extra = `\n\n👥 Cupo actualizado: ${data.cupoActual}/${data.cupoTotal} — ${data.lugaresDisponibles} lugar(es) disponible(s).`;
+      if (data.huellasMaxDepto) extra += `\n🏠 Depto ${depto}: ${data.huellasUsadasDepto}/${data.huellasMaxDepto} registros usados para este evento.`;
+      addMessage(`✅ *${data.mensaje}*${extra}`, "bot");
       // Refresca registros en segundo plano para que el cupo se vea actualizado en toda la UI
       DATA.registros = await cargarCsv(URL_REGISTROS_CSV).then(r => r.map(x => ({
         eventoid: x["eventoid"] || x["EventoID"] || "",
@@ -454,6 +459,8 @@ async function confirmarRegistroBackend(eventoId, categoria, depto, nombre) {
       addMessage(`🚫 ${data.error}`, "bot");
     } else if (data.cupoLleno) {
       addMessage(`🔴 ${data.error}`, "bot");
+    } else if (data.huellasAgotadas) {
+      addMessage(`🚫 ${data.error}`, "bot");
     } else {
       addMessage(`⚠️ No se pudo completar el registro: ${data.error || "Error desconocido."}`, "bot");
     }
@@ -470,7 +477,6 @@ function responderMensajeLocal(textoOriginal) {
 
   if (normalizado.includes("hoy")) return respuestaEventosHoy();
   if (normalizado.includes("semana") || normalizado.includes("agenda") || normalizado.includes("programaci")) return respuestaAgendaSemanal();
-  if (normalizado.includes("todos los eventos") || normalizado === "eventos activos" || normalizado.includes("ver eventos")) return respuestaTodosActivos();
   if (normalizado.includes("ayuda") || normalizado === "hola") {
     return "👋 ¡Hola! Puedo mostrarte los eventos de hoy, la programación de la semana, o ayudarte a registrarte a cualquier evento activo directamente aquí en el chat.";
   }
@@ -533,58 +539,231 @@ window.handleQuickAction = function(accion) {
   }, 300);
 };
 
-// ---------- Panel Admin (creación / cancelación de eventos, protegido con PIN) ----------
-window.abrirPanelAdmin = async function() {
-  const pin = prompt("PIN de administración del Comité:");
-  if (!pin) return;
-  const accion = prompt("¿Qué deseas hacer?\n1 = Crear evento\n2 = Cancelar evento\n\nEscribe 1 o 2:");
+// ---------- Panel Admin (modal): creación / cancelación de eventos, protegido con PIN ----------
+let adminState = { paso: "pin", pin: null, categoria: null, evento: null };
 
-  if (accion === "1") {
-    const categoria = prompt("Categoría (Deportivos / Sociales / Culturales / Impacto):");
-    if (!CATEGORIAS[categoria]) { alert("Categoría inválida."); return; }
-    const nombre = prompt("Nombre del evento:");
-    const descripcion = prompt("Descripción (opcional):") || "";
-    const fecha = prompt("Fecha (YYYY-MM-DD):");
-    const horaInicio = prompt("Hora inicio (ej. 10:00):") || "";
-    const horaFin = prompt("Hora fin (ej. 12:00):") || "";
-    const ubicacion = prompt("Ubicación:") || "";
-    const cupoTotal = prompt("Cupo total:") || "0";
-
-    if (!nombre || !fecha) { alert("Nombre y fecha son obligatorios."); return; }
-
-    try {
-      const url = `${URL_AGENTE_EVENTOS}?accion=crear_evento&pin=${encodeURIComponent(pin)}&categoria=${encodeURIComponent(categoria)}&nombre=${encodeURIComponent(nombre)}&descripcion=${encodeURIComponent(descripcion)}&fecha=${encodeURIComponent(fecha)}&horaInicio=${encodeURIComponent(horaInicio)}&horaFin=${encodeURIComponent(horaFin)}&ubicacion=${encodeURIComponent(ubicacion)}&cupoTotal=${encodeURIComponent(cupoTotal)}`;
-      const res = await fetch(url, { cache: "no-store" });
-      const data = await res.json();
-      if (data.ok) {
-        alert(`Evento creado: ${data.eventoId}`);
-        inicializar();
-      } else {
-        alert(data.error || "No se pudo crear el evento.");
-      }
-    } catch (err) {
-      alert("Error de conexión: " + err.toString());
-    }
-  } else if (accion === "2") {
-    const categoria = prompt("Categoría del evento a cancelar (Deportivos / Sociales / Culturales / Impacto):");
-    if (!CATEGORIAS[categoria]) { alert("Categoría inválida."); return; }
-    const eventoId = prompt("EventoID a cancelar (ej. DEP-A1B2C3):");
-    if (!eventoId) return;
-    try {
-      const url = `${URL_AGENTE_EVENTOS}?accion=cancelar_evento&pin=${encodeURIComponent(pin)}&categoria=${encodeURIComponent(categoria)}&eventoId=${encodeURIComponent(eventoId)}`;
-      const res = await fetch(url, { cache: "no-store" });
-      const data = await res.json();
-      if (data.ok) {
-        alert("Evento cancelado.");
-        inicializar();
-      } else {
-        alert(data.error || "No se pudo cancelar el evento.");
-      }
-    } catch (err) {
-      alert("Error de conexión: " + err.toString());
-    }
-  }
+window.abrirPanelAdmin = function() {
+  adminState = { paso: "pin", pin: null, categoria: null, evento: null };
+  const modal = document.getElementById("modalAdmin");
+  if (modal) modal.classList.remove("hidden");
+  renderAdminPanel();
 };
+
+window.cerrarModalAdmin = function() {
+  const modal = document.getElementById("modalAdmin");
+  if (modal) modal.classList.add("hidden");
+};
+
+function renderAdminPanel() {
+  const body = document.getElementById("adminBody");
+  if (!body) return;
+
+  // ---- Paso 1: PIN ----
+  if (adminState.paso === "pin") {
+    body.innerHTML = `
+      <p class="text-sm text-slate-600 mb-3">Ingresa el PIN de administración del Comité:</p>
+      <input id="adminPinInput" type="password" autocomplete="off"
+        class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-brand-500/40" placeholder="PIN">
+      <button id="adminPinContinuar" class="w-full bg-brand-600 hover:bg-brand-700 text-white text-sm font-bold rounded-lg py-2.5 transition">Continuar</button>
+    `;
+    const input = document.getElementById("adminPinInput");
+    const continuar = () => {
+      const pin = input.value.trim();
+      if (!pin) return;
+      adminState.pin = pin;
+      adminState.paso = "menu";
+      renderAdminPanel();
+    };
+    document.getElementById("adminPinContinuar").addEventListener("click", continuar);
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") continuar(); });
+    input.focus();
+    return;
+  }
+
+  // ---- Paso 2: Menú ----
+  if (adminState.paso === "menu") {
+    body.innerHTML = `
+      <div class="space-y-2">
+        <button id="adminBtnCrear" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg py-2.5 transition">➕ Crear evento</button>
+        <button id="adminBtnCancelar" class="w-full bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-lg py-2.5 transition">🛑 Cancelar evento</button>
+      </div>
+    `;
+    document.getElementById("adminBtnCrear").addEventListener("click", () => { adminState.paso = "crear"; renderAdminPanel(); });
+    document.getElementById("adminBtnCancelar").addEventListener("click", () => { adminState.paso = "cancelar_categoria"; renderAdminPanel(); });
+    return;
+  }
+
+  // ---- Paso 3a: Crear evento (con date/time/ubicación pickers) ----
+  if (adminState.paso === "crear") {
+    body.innerHTML = `
+      <div class="space-y-2.5 max-h-[55vh] overflow-y-auto pr-1">
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1">Categoría</label>
+          <select id="fCategoria" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+            ${Object.keys(CATEGORIAS).map(c => `<option value="${c}">${CATEGORIAS[c].emoji} ${CATEGORIAS[c].labelSidebar}</option>`).join("")}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1">Nombre del evento</label>
+          <input id="fNombre" type="text" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1">Descripción</label>
+          <textarea id="fDescripcion" rows="2" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"></textarea>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1">Fecha</label>
+          <input id="fFecha" type="date" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-xs font-bold text-slate-500 mb-1">Hora inicio</label>
+            <input id="fHoraInicio" type="time" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-500 mb-1">Hora fin</label>
+            <input id="fHoraFin" type="time" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1">Ubicación</label>
+          <select id="fUbicacion" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+            ${UBICACIONES.map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join("")}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1">Cupo total</label>
+          <input id="fCupo" type="number" min="1" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+        </div>
+      </div>
+      <div class="flex gap-2 mt-4">
+        <button id="adminBtnVolverMenu1" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg py-2.5 transition">← Volver</button>
+        <button id="adminBtnGuardarEvento" class="flex-1 bg-brand-600 hover:bg-brand-700 text-white text-sm font-bold rounded-lg py-2.5 transition">Crear evento</button>
+      </div>
+    `;
+    document.getElementById("adminBtnVolverMenu1").addEventListener("click", () => { adminState.paso = "menu"; renderAdminPanel(); });
+    document.getElementById("adminBtnGuardarEvento").addEventListener("click", crearEventoDesdeAdmin);
+    return;
+  }
+
+  // ---- Paso 3b-1: Cancelar — elegir categoría ----
+  if (adminState.paso === "cancelar_categoria") {
+    body.innerHTML = `
+      <p class="text-sm text-slate-600 mb-3">¿De qué categoría es el evento a cancelar?</p>
+      <div class="space-y-2">
+        ${Object.keys(CATEGORIAS).map(c => `<button class="admin-cat-btn w-full text-left bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg px-3 py-2.5 transition" data-cat="${c}">${CATEGORIAS[c].emoji} ${CATEGORIAS[c].labelSidebar}</button>`).join("")}
+      </div>
+      <button id="adminBtnVolverMenu2" class="w-full mt-3 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-lg py-2 transition">← Volver</button>
+    `;
+    document.querySelectorAll(".admin-cat-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        adminState.categoria = btn.getAttribute("data-cat");
+        adminState.paso = "cancelar_lista";
+        renderAdminPanel();
+      });
+    });
+    document.getElementById("adminBtnVolverMenu2").addEventListener("click", () => { adminState.paso = "menu"; renderAdminPanel(); });
+    return;
+  }
+
+  // ---- Paso 3b-2: Cancelar — elegir evento de una lista (ya no se escribe el ID a mano) ----
+  if (adminState.paso === "cancelar_lista") {
+    const activos = (DATA[adminState.categoria] || []).filter(e => e.estado.toLowerCase() === "activo")
+      .sort((a, b) => parseFechaLocal(a.fecha) - parseFechaLocal(b.fecha));
+    body.innerHTML = `
+      <p class="text-sm text-slate-600 mb-3">Eventos activos en <strong>${adminState.categoria}</strong>:</p>
+      <div class="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
+        ${activos.length ? activos.map(ev => `
+          <button class="admin-ev-btn w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-3 py-2 transition" data-id="${ev.eventoid}">
+            <span class="font-bold text-slate-800 text-sm block">${escapeHtml(ev.nombre)}</span>
+            <span class="text-xs text-slate-500">${ev.fecha} · ${ev.horainicio || "N/A"}h · ${escapeHtml(ev.ubicacion || "N/A")}</span>
+          </button>`).join("")
+          : `<p class="text-xs text-slate-400">No hay eventos activos en esta categoría.</p>`}
+      </div>
+      <button id="adminBtnVolverCat" class="w-full mt-3 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-lg py-2 transition">← Volver</button>
+    `;
+    document.querySelectorAll(".admin-ev-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        adminState.evento = activos.find(e => e.eventoid === btn.getAttribute("data-id"));
+        adminState.paso = "cancelar_confirmar";
+        renderAdminPanel();
+      });
+    });
+    document.getElementById("adminBtnVolverCat").addEventListener("click", () => { adminState.paso = "cancelar_categoria"; renderAdminPanel(); });
+    return;
+  }
+
+  // ---- Paso 3b-3: Cancelar — confirmación con detalles del evento ----
+  if (adminState.paso === "cancelar_confirmar") {
+    const ev = adminState.evento;
+    const info = cupoInfo(ev);
+    const fecha = ev.fecha ? formatearFecha(parseFechaLocal(ev.fecha)) : "Sin fecha";
+    body.innerHTML = `
+      <p class="text-sm font-bold text-red-700 mb-2">⚠️ Vas a cancelar este evento:</p>
+      <div class="bg-red-50 border border-red-100 rounded-lg p-3 mb-3 text-sm text-slate-700 space-y-1">
+        <p class="font-bold text-slate-800">${escapeHtml(ev.nombre)}</p>
+        <p>Categoría: ${ev.categoria}</p>
+        <p>Fecha: ${fecha} · ${ev.horainicio || "N/A"} - ${ev.horafin || "N/A"}</p>
+        <p>Lugar: ${escapeHtml(ev.ubicacion || "N/A")}</p>
+        <p>Cupo actual: <strong>${info.texto}</strong></p>
+      </div>
+      <p class="text-xs text-slate-500 mb-3">Esta acción no se puede deshacer desde aquí. Los residentes ya registrados no reciben notificación automática — avísales por otro medio si aplica.</p>
+      <div class="flex gap-2">
+        <button id="adminBtnVolverLista" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg py-2.5 transition">← Volver</button>
+        <button id="adminBtnConfirmarCancelar" class="flex-1 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-lg py-2.5 transition">Confirmar cancelación</button>
+      </div>
+    `;
+    document.getElementById("adminBtnVolverLista").addEventListener("click", () => { adminState.paso = "cancelar_lista"; renderAdminPanel(); });
+    document.getElementById("adminBtnConfirmarCancelar").addEventListener("click", confirmarCancelacionDesdeAdmin);
+    return;
+  }
+}
+
+async function crearEventoDesdeAdmin() {
+  const categoria = document.getElementById("fCategoria").value;
+  const nombre = document.getElementById("fNombre").value.trim();
+  const descripcion = document.getElementById("fDescripcion").value.trim();
+  const fecha = document.getElementById("fFecha").value;
+  const horaInicio = document.getElementById("fHoraInicio").value;
+  const horaFin = document.getElementById("fHoraFin").value;
+  const ubicacion = document.getElementById("fUbicacion").value;
+  const cupoTotal = document.getElementById("fCupo").value || "0";
+
+  if (!nombre || !fecha) { alert("Nombre y fecha son obligatorios."); return; }
+
+  try {
+    const url = `${URL_AGENTE_EVENTOS}?accion=crear_evento&pin=${encodeURIComponent(adminState.pin)}&categoria=${encodeURIComponent(categoria)}&nombre=${encodeURIComponent(nombre)}&descripcion=${encodeURIComponent(descripcion)}&fecha=${encodeURIComponent(fecha)}&horaInicio=${encodeURIComponent(horaInicio)}&horaFin=${encodeURIComponent(horaFin)}&ubicacion=${encodeURIComponent(ubicacion)}&cupoTotal=${encodeURIComponent(cupoTotal)}`;
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json();
+    if (data.ok) {
+      alert(`Evento creado: ${data.eventoId}`);
+      window.cerrarModalAdmin();
+      inicializar();
+    } else {
+      alert(data.error || "No se pudo crear el evento. Verifica el PIN.");
+    }
+  } catch (err) {
+    alert("Error de conexión: " + err.toString());
+  }
+}
+
+async function confirmarCancelacionDesdeAdmin() {
+  const ev = adminState.evento;
+  try {
+    const url = `${URL_AGENTE_EVENTOS}?accion=cancelar_evento&pin=${encodeURIComponent(adminState.pin)}&categoria=${encodeURIComponent(ev.categoria)}&eventoId=${encodeURIComponent(ev.eventoid)}`;
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json();
+    if (data.ok) {
+      alert("Evento cancelado correctamente.");
+      window.cerrarModalAdmin();
+      inicializar();
+    } else {
+      alert(data.error || "No se pudo cancelar el evento. Verifica el PIN.");
+    }
+  } catch (err) {
+    alert("Error de conexión: " + err.toString());
+  }
+}
 
 // ---------- Calendario Mensual de Eventos ----------
 let calendarioState = null;

@@ -72,10 +72,6 @@
         data-query="Ver programación de eventos de la semana">
         📅 <span>Programación Eventos de la Semana</span>
       </button>
-      <button class="quick-action w-full flex items-center gap-2 text-sm font-medium bg-purple-600 hover:bg-purple-700 text-white rounded-xl px-3 py-2.5 shadow-sm shadow-purple-600/30 transition"
-        data-query="Ver todos los eventos activos">
-        🗓️ <span>Todos los eventos activos</span>
-      </button>
       <button onclick="abrirModalCalendario()" class="w-full flex items-center gap-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-3 py-2.5 shadow-sm shadow-indigo-600/30 transition">
         📆 <span>Calendario Mensual</span>
       </button>
@@ -189,6 +185,17 @@
       <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-sky-200 inline-block"></span> Impacto Comunitario</span>
     </div>
     <div id="calendarioBody" class="flex-1 overflow-y-auto p-3"></div>
+  </div>
+</div>
+
+<!-- Ventana Flotante (Modal) para el Panel del Comité (Admin) -->
+<div id="modalAdmin" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+  <div class="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[85vh]">
+    <div class="px-5 py-4 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
+      <h3 class="text-sm font-bold text-white">⚙️ Panel del Comité (Admin)</h3>
+      <button onclick="cerrarModalAdmin()" class="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 text-white font-bold text-sm transition">✕</button>
+    </div>
+    <div id="adminBody" class="p-5 overflow-y-auto"></div>
   </div>
 </div>
 
