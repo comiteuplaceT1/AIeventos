@@ -148,6 +148,9 @@ function parseFechaLocal(fechaStr) {
     partes = limpia.split("-");
     y = Number(partes[0]); m = Number(partes[1]); d = Number(partes[2]);
   }
+  // Si el año viene en 2 dígitos (ej. Sheets exportó "31/08/26" al CSV porque la celda
+  // es una fecha nativa, no texto), JS interpretaría 26 como 1926. Lo corregimos a 2026.
+  if (y < 100) y += 2000;
   return new Date(y, (m || 1) - 1, d || 1, 12, 0, 0, 0);
 }
 function formatearFecha(fecha) {
