@@ -14,7 +14,7 @@ const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7
 
 // ⚠️ COPIA AQUÍ EL LINK DE IMPLEMENTACIÓN DE TU GOOGLE APPS SCRIPT (APLICACIÓN WEB /EXEC)
 // Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con Gemini.
-const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbwuLB7Fk8MEMNoKbxxCTsujTLNBKE6GmzjbO7GhOFekWP5kU_dFBb-aXfloCMdQr-FO/exec";
+const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbyJysGNNzJaF7SUaq1oyKAwhXGYz9OYBTCJF3rC094HeD2ljCPKAOPV0wjn0ArJvQ/exec";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -48,7 +48,8 @@ let DATA = {
   Sociales: [],
   Culturales: [],
   Impacto: [],
-  registros: []
+  registros: [],
+  cuposLive: {} // { eventoId: confirmados } leído directo del backend, sin caché de CSV publicado
 };
 
 // Estado de la conversación de registro en curso (flujo 100% en el chat)
@@ -168,8 +169,13 @@ function inicioSemana(fechaBase) {
 
 // ---------- Cupo ----------
 function contarConfirmados(eventoId) {
+  const idNorm = String(eventoId).trim();
+  // Prioriza el cupo leído en vivo del backend (sin el retraso de caché del CSV publicado).
+  if (DATA.cuposLive && Object.prototype.hasOwnProperty.call(DATA.cuposLive, idNorm)) {
+    return DATA.cuposLive[idNorm];
+  }
   return DATA.registros.filter(r =>
-    String(r.eventoid || "").trim() === String(eventoId).trim() &&
+    String(r.eventoid || "").trim() === idNorm &&
     String(r.estado || "").trim().toLowerCase() === "confirmado"
   ).length;
 }
@@ -232,24 +238,30 @@ async function inicializar() {
       }
     });
 
-    const scrollContainer = document.getElementById("deportivosList")?.parentNode?.parentNode;
-    if (scrollContainer) {
-      scrollContainer.innerHTML = "";
-      Object.keys(CATEGORIAS).forEach(categoria => {
-        const cfg = CATEGORIAS[categoria];
-        const idLista = `${categoria.toLowerCase()}Accordion`;
-        const div = crearSeccionMenu(cfg.labelSidebar, idLista);
-        scrollContainer.appendChild(div);
-        const eventosActivos = DATA[categoria].filter(e => e.estado.toLowerCase() === "activo");
-        inyectarSubmenuEventos(idLista, eventosActivos, categoria, cfg.emoji);
-      });
-    }
+    renderSidebarEventos();
+    refrescarCuposLive();
 
     if (messagesEl && messagesEl.children.length === 0) {
       addMessage("👋 *¡Hola! Bienvenido a Eventos Comunitarios de Uplace.*\n\nSoy tu *Agente IA de Eventos* y puedo ayudarte a ver qué hay programado, consultar cupo disponible y registrarte directamente aquí en el chat. Despliega los menús de la izquierda por categoría o pregúntame lo que necesites.", "bot");
     }
   } catch (error) {
     console.error("Error cargando los datos desde Google Sheets:", error);
+  }
+}
+
+// Refresca SOLO el cupo (llamada liviana y frecuente al backend, sin pasar por el
+// caché del CSV publicado de Google). Repinta el sidebar con datos reales.
+async function refrescarCuposLive() {
+  try {
+    const url = `${URL_AGENTE_EVENTOS}?accion=obtener_cupos&_ts=${Date.now()}`;
+    const res = await fetch(url, { method: "GET", cache: "no-store" });
+    const data = await res.json();
+    if (data.ok) {
+      DATA.cuposLive = data.cupos || {};
+      renderSidebarEventos();
+    }
+  } catch (e) {
+    console.log("No se pudo refrescar el cupo en vivo:", e);
   }
 }
 
@@ -468,15 +480,22 @@ async function confirmarRegistroBackend(eventoId, categoria, depto, nombre) {
       let extra = `\n\n👥 Cupo actualizado: ${data.cupoActual}/${data.cupoTotal} — ${data.lugaresDisponibles} lugar(es) disponible(s).`;
       if (data.huellasMaxDepto) extra += `\n🏠 Depto ${depto}: ${data.huellasUsadasDepto}/${data.huellasMaxDepto} registros usados para este evento.`;
       addMessage(`✅ *${data.mensaje}*${extra}`, "bot");
-      // Refresca registros en segundo plano para que el cupo se vea actualizado en toda la UI
-      DATA.registros = await cargarCsv(URL_REGISTROS_CSV).then(r => r.map(x => ({
-        eventoid: x["eventoid"] || x["EventoID"] || "",
-        categoria: x["categoria"] || "",
-        depto: x["depto"] || "",
-        nombre: x["nombre"] || "",
-        estado: x["estado"] || ""
-      })));
+      // Actualiza el cupo en vivo de inmediato con el valor que ya regresó el registro
+      // (sin esperar ninguna otra llamada), y repinta el sidebar al instante.
+      DATA.cuposLive[String(eventoId).trim()] = data.cupoActual;
       renderSidebarEventos();
+      // En paralelo, refresca registros (CSV) y el mapa de cupo completo por si hubo
+      // otros registros simultáneos de otros residentes.
+      cargarCsv(URL_REGISTROS_CSV).then(r => {
+        DATA.registros = r.map(x => ({
+          eventoid: x["eventoid"] || x["EventoID"] || "",
+          categoria: x["categoria"] || "",
+          depto: x["depto"] || "",
+          nombre: x["nombre"] || "",
+          estado: x["estado"] || ""
+        }));
+      });
+      refrescarCuposLive();
     } else if (data.moroso) {
       addMessage(`🚫 ${data.error}`, "bot");
     } else if (data.cupoLleno) {
@@ -981,4 +1000,5 @@ window.irMesActualCalendario = function() {
 };
 
 inicializar();
-setInterval(inicializar, 60000); // refresca eventos y cupo cada 60s
+setInterval(inicializar, 60000); // refresca eventos completos cada 60s
+setInterval(refrescarCuposLive, 12000); // refresca SOLO el cupo cada 12s (llamada liviana, sin caché)
