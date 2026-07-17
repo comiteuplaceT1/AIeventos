@@ -14,7 +14,7 @@ const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7
 
 // ⚠️ COPIA AQUÍ EL LINK DE IMPLEMENTACIÓN DE TU GOOGLE APPS SCRIPT (APLICACIÓN WEB /EXEC)
 // Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con Gemini.
-const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbwzHDst8amywsOkD8Ki8OFhI074nDhLu1Tvp2AF1o1S8Pw_DlyOAPIfJW-TZzFPauU/exec";
+const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbwwlJotZZP_SCc33qVTTc0kefHwc-XjZ5EU-8xHWD6spMX6tu05Xl9Dq-pOXVwTkgWV/exec";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -57,6 +57,11 @@ let DATA = {
 // Estado de la conversación de registro en curso (flujo 100% en el chat)
 let registroEnCurso = null; // { eventoId, categoria, nombreEvento, fechaSesion, esRecurrente, paso: 'depto'|'nombre'|'dias', depto, nombreAsistente }
 let consultaEnCurso = null; // { tipo: 'consultar'|'cancelar', nombreFiltro, paso: 'depto' }
+
+// Se recuerdan mientras dure la pestaña abierta (viven en memoria, no en localStorage/
+// sessionStorage) para no repetir depto/nombre en cada flujo — se pierden con un refresh.
+let deptoRecordado = null;
+let nombreRecordado = null;
 
 const messagesEl = document.getElementById("messages");
 const chatForm = document.getElementById("chatForm");
@@ -389,6 +394,16 @@ function generarOcurrenciasEnRango(evento, rangoInicio, rangoFin) {
   return ocurrencias;
 }
 
+// Ocurrencias de un evento recurrente dentro del mes calendario en curso (a partir de
+// hoy), respetando FechaFin si es antes de que termine el mes.
+function ocurrenciasDelMesActual(evento) {
+  const hoy = hoyMedianoche();
+  const finMes = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0, 12, 0, 0);
+  const finSerie = evento.fechafin ? parseFechaLocal(evento.fechafin) : finMes;
+  const limite = finSerie < finMes ? finSerie : finMes;
+  return generarOcurrenciasEnRango(evento, hoy, limite);
+}
+
 function recurrenciaTexto(evento) {
   if (!esRecurrente(evento)) return null;
   const dias = evento.diasemana.join(", ");
@@ -629,13 +644,58 @@ window.iniciarRegistro = function(eventoId, categoria, nombreEvento, fechaSesion
     }
   }
 
+  // Si ya tenemos depto Y nombre de un registro anterior en esta misma sesión del
+  // navegador, ofrecemos un atajo de un clic — sin forzar, por si es otra persona
+  // del mismo depto la que se quiere registrar esta vez.
+  if (deptoRecordado && nombreRecordado) {
+    const nombreEventoEsc = escapeHtml(nombreEvento).replace(/'/g, "\\'");
+    const fechaArg = fechaSesion || "";
+    addMessage(`Vamos a registrarte en *${nombreEvento}*.\n\n¿Uso los mismos datos de tu último registro? Depto *${deptoRecordado}*, nombre *${nombreRecordado}*.`, "bot");
+    const botones = `<button onclick="window.usarDatosRecordados('${eventoId}','${categoria}','${nombreEventoEsc}','${fechaArg}')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">✅ Sí, usar estos datos</button><button onclick="window.cambiarDatosRegistro('${eventoId}','${categoria}','${nombreEventoEsc}','${fechaArg}')" class="inline-block text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg px-3 py-1.5 transition">✏️ Usar otros datos</button>`;
+    addMessage(botones, "bot");
+    return;
+  }
+
   registroEnCurso = {
     eventoId, categoria, nombreEvento,
     fechaSesion: fechaSesion || null,
     esRecurrente: recurrente,
+    paso: deptoRecordado ? "nombre" : "depto",
+    depto: deptoRecordado || undefined
+  };
+
+  if (deptoRecordado) {
+    addMessage(`Vamos a registrarte en *${nombreEvento}* (depto ${deptoRecordado}, el mismo de antes).\n\nIndica el nombre completo de quien asistirá, o escribe *cambiar depto* si no es el correcto.`, "bot");
+  } else {
+    addMessage(`Vamos a registrarte en *${nombreEvento}*.\n\nPor favor indica tu número de departamento (ej. 3003). Escribe *cancelar* en cualquier momento para salir de este registro.`, "bot");
+  }
+  if (chatInput) chatInput.focus();
+};
+
+window.usarDatosRecordados = async function(eventoId, categoria, nombreEvento, fechaSesion) {
+  const depto = deptoRecordado;
+  const nombre = nombreRecordado;
+  const evento = buscarEventoPorId(eventoId, categoria);
+  const recurrente = evento ? esRecurrente(evento) : false;
+
+  if (recurrente && !fechaSesion) {
+    mostrarBotonesDias(eventoId, categoria, depto, nombre, nombreEvento);
+    return;
+  }
+
+  addMessage(`Confirmando registro de *${nombre}* (depto ${depto}) en *${nombreEvento}*…`, "bot");
+  await confirmarRegistroBackend(eventoId, categoria, depto, nombre, { fechaSesion: fechaSesion || null });
+};
+
+window.cambiarDatosRegistro = function(eventoId, categoria, nombreEvento, fechaSesion) {
+  const evento = buscarEventoPorId(eventoId, categoria);
+  registroEnCurso = {
+    eventoId, categoria, nombreEvento,
+    fechaSesion: fechaSesion || null,
+    esRecurrente: evento ? esRecurrente(evento) : false,
     paso: "depto"
   };
-  addMessage(`Vamos a registrarte en *${nombreEvento}*.\n\nPor favor indica tu número de departamento (ej. 3003). Escribe *cancelar* en cualquier momento para salir de este registro.`, "bot");
+  addMessage(`Ok, indica el nuevo número de departamento (ej. 3003):`, "bot");
   if (chatInput) chatInput.focus();
 };
 
@@ -654,25 +714,31 @@ async function continuarFlujoRegistro(texto) {
       return;
     }
     registroEnCurso.depto = txtLimpio;
+    deptoRecordado = txtLimpio;
     registroEnCurso.paso = "nombre";
     addMessage("Gracias. Ahora indica el nombre completo de quien asistirá:", "bot");
     return;
   }
 
   if (registroEnCurso.paso === "nombre") {
+    if (txtLimpio.toLowerCase() === "cambiar depto") {
+      registroEnCurso.paso = "depto";
+      addMessage("Ok, indica el número de departamento correcto:", "bot");
+      return;
+    }
     if (txtLimpio.length < 3) {
       addMessage("Por favor escribe el nombre completo del asistente, o escribe *cancelar*.", "bot");
       return;
     }
     registroEnCurso.nombreAsistente = txtLimpio;
+    nombreRecordado = txtLimpio;
 
-    // Evento recurrente sin sesión puntual ya elegida: preguntamos qué días.
+    // Evento recurrente sin sesión puntual ya elegida: mostramos botones de días
+    // (en vez de pedir que lo escriba, para evitar errores de tipeo/ambigüedad).
     if (registroEnCurso.esRecurrente && !registroEnCurso.fechaSesion) {
-      const evento = buscarEventoPorId(registroEnCurso.eventoId, registroEnCurso.categoria);
-      const diasLista = evento ? evento.diasemana : [];
-      const diasDisponibles = diasLista.join(", ") || "N/A";
-      registroEnCurso.paso = "dias";
-      addMessage(`¿A qué día(s) quieres registrarte? Los días disponibles para *${registroEnCurso.nombreEvento}* son: *${diasDisponibles}*.\n\nEscribe uno o varios de esos días exactamente (ej. "${diasLista[0] || "Lunes"}"), o escribe *todos* para registrarte a todas las sesiones restantes de la serie.`, "bot");
+      const { eventoId, categoria, nombreEvento, depto, nombreAsistente } = registroEnCurso;
+      registroEnCurso = null;
+      mostrarBotonesDias(eventoId, categoria, depto, nombreAsistente, nombreEvento);
       return;
     }
 
@@ -682,32 +748,84 @@ async function continuarFlujoRegistro(texto) {
     await confirmarRegistroBackend(eventoId, categoria, depto, txtLimpio, { fechaSesion });
     return;
   }
-
-  if (registroEnCurso.paso === "dias") {
-    const evento = buscarEventoPorId(registroEnCurso.eventoId, registroEnCurso.categoria);
-    const diasSerieNorm = evento ? evento.diasemana.map(normalizarTexto) : [];
-    const rawNorm = normalizarTexto(txtLimpio);
-    const esTodos = rawNorm === "todos" || rawNorm === "todos los dias";
-    const solicitados = rawNorm.split(",").map(d => d.trim()).filter(d => d);
-    const validos = esTodos ? diasSerieNorm : diasSerieNorm.filter(d => solicitados.includes(d));
-
-    if (!validos.length) {
-      addMessage(`No reconocí esos días dentro de la serie (${evento ? evento.diasemana.join(", ") : ""}). Escribe uno o varios de esos días exactamente, o escribe *todos*.`, "bot");
-      return;
-    }
-
-    const { eventoId, categoria, nombreEvento, depto, nombreAsistente } = registroEnCurso;
-    addMessage(`Confirmando registro de *${nombreAsistente}* (depto ${depto}) en *${nombreEvento}* para: *${esTodos ? "todas las sesiones" : txtLimpio}*…`, "bot");
-    registroEnCurso = null;
-    await confirmarRegistroBackend(eventoId, categoria, depto, nombreAsistente, { diasElegidos: esTodos ? "todos" : txtLimpio });
-  }
 }
+
+// ---------- Selección de sesión por botones (sin escribir texto) ----------
+function mostrarBotonesDias(eventoId, categoria, depto, nombreAsistente, nombreEvento) {
+  const evento = buscarEventoPorId(eventoId, categoria);
+  const diasSerie = evento ? evento.diasemana : [];
+  const nombreAsistenteEsc = escapeHtml(nombreAsistente).replace(/'/g, "\\'");
+  const nombreEventoEsc = escapeHtml(nombreEvento).replace(/'/g, "\\'");
+
+  let msg = `¿A qué día(s) quieres registrarte en *${nombreEvento}*? Elige una opción:\n\n`;
+  diasSerie.forEach(dia => {
+    msg += `<button onclick="window.elegirDiaRegistro('${eventoId}','${categoria}','${depto}','${nombreAsistenteEsc}','${nombreEventoEsc}','${dia}')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">${dia}</button>`;
+  });
+  msg += `<button onclick="window.elegirDiaRegistro('${eventoId}','${categoria}','${depto}','${nombreAsistenteEsc}','${nombreEventoEsc}','todos')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-brand-800 hover:bg-brand-900 rounded-lg px-3 py-1.5 transition">Todos los días</button>`;
+  msg += `\n📌 El registro cubre solo las sesiones de este mes — el próximo mes deberás volver a confirmar.`;
+  addMessage(msg, "bot");
+}
+
+// Fechas candidatas de ESTE MES para un día específico (o todos los días de la serie)
+function calcularFechasCandidatas(evento, diaTexto) {
+  const esTodos = normalizarTexto(diaTexto) === "todos";
+  const ocurrencias = ocurrenciasDelMesActual(evento);
+  const candidatas = esTodos
+    ? ocurrencias
+    : ocurrencias.filter(f => normalizarTexto(DIAS_SEMANA_LARGOS[f.getDay()]) === normalizarTexto(diaTexto));
+  return candidatas.map(f => fechaISO(f));
+}
+
+window.elegirDiaRegistro = async function(eventoId, categoria, depto, nombreAsistente, nombreEvento, diaTexto) {
+  addMessage(diaTexto === "todos" ? "Todos los días" : diaTexto, "user");
+
+  const evento = buscarEventoPorId(eventoId, categoria);
+  if (!evento) { addMessage("⚠️ No encontré ese evento.", "bot"); return; }
+
+  const candidatas = calcularFechasCandidatas(evento, diaTexto);
+  if (!candidatas.length) {
+    addMessage(`No encontré sesiones de *${nombreEvento}* este mes para esa opción. Intenta el próximo mes o revisa con el Comité.`, "bot");
+    return;
+  }
+  if (candidatas.length === 1) {
+    addMessage(`Confirmando registro de *${nombreAsistente}* (depto ${depto}) en *${nombreEvento}* para el ${formatearFecha(parseFechaLocal(candidatas[0]))}…`, "bot");
+    await confirmarRegistroBackend(eventoId, categoria, depto, nombreAsistente, { fechaSesion: candidatas[0] });
+    return;
+  }
+  mostrarSeleccionSesiones(eventoId, categoria, depto, nombreAsistente, nombreEvento, candidatas);
+};
+
+function mostrarSeleccionSesiones(eventoId, categoria, depto, nombreAsistente, nombreEvento, candidatas) {
+  const nombreAsistenteEsc = escapeHtml(nombreAsistente).replace(/'/g, "\\'");
+  const nombreEventoEsc = escapeHtml(nombreEvento).replace(/'/g, "\\'");
+
+  let msg = `Encontré estas sesiones de *${nombreEvento}* este mes. Elige a cuál(es) quieres registrarte:\n\n`;
+  candidatas.forEach(fechaIso => {
+    const fechaDate = parseFechaLocal(fechaIso);
+    const nombreDia = DIAS_SEMANA_LARGOS[fechaDate.getDay()];
+    msg += `📅 ${nombreDia} ${formatearFecha(fechaDate)}\n`;
+    msg += `<button onclick="window.confirmarRegistroConFechas('${eventoId}','${categoria}','${depto}','${nombreAsistenteEsc}','${fechaIso}','${nombreEventoEsc}')" class="mt-0.5 mb-1.5 inline-block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-2 py-1 transition">✅ Solo este día</button>\n`;
+  });
+
+  if (candidatas.length > 1) {
+    const todasCsv = candidatas.join(",");
+    msg += `\n<button onclick="window.confirmarRegistroConFechas('${eventoId}','${categoria}','${depto}','${nombreAsistenteEsc}','${todasCsv}','${nombreEventoEsc}')" class="mt-1 block text-[11px] font-bold text-white bg-brand-800 hover:bg-brand-900 rounded-lg px-3 py-1.5 transition">✅ Registrarme a todos estos días (${candidatas.length})</button>`;
+  }
+  addMessage(msg.trim(), "bot");
+}
+
+window.confirmarRegistroConFechas = async function(eventoId, categoria, depto, nombreAsistente, fechasCsv, nombreEvento) {
+  addMessage(`Confirmando registro de *${nombreAsistente}* (depto ${depto}) en *${nombreEvento}*…`, "bot");
+  const opciones = fechasCsv.includes(",") ? { fechasSesion: fechasCsv } : { fechaSesion: fechasCsv };
+  await confirmarRegistroBackend(eventoId, categoria, depto, nombreAsistente, opciones);
+};
 
 async function confirmarRegistroBackend(eventoId, categoria, depto, nombre, opciones) {
   opciones = opciones || {};
   try {
     let url = `${URL_AGENTE_EVENTOS}?accion=registrar&eventoId=${encodeURIComponent(eventoId)}&categoria=${encodeURIComponent(categoria)}&depto=${encodeURIComponent(depto)}&nombre=${encodeURIComponent(nombre)}`;
     if (opciones.fechaSesion) url += `&fechaSesion=${encodeURIComponent(opciones.fechaSesion)}`;
+    if (opciones.fechasSesion) url += `&fechasSesion=${encodeURIComponent(opciones.fechasSesion)}`;
     if (opciones.diasElegidos) url += `&diasElegidos=${encodeURIComponent(opciones.diasElegidos)}`;
 
     const res = await fetch(url, { method: "GET", cache: "no-store" });
@@ -771,6 +889,10 @@ function mostrarResultadoMultiSesion(eventoId, data) {
     });
   }
 
+  if (confirmadas.length > 0) {
+    msg += `\n📌 Este registro cubre solo las sesiones de este mes. Para seguir el próximo mes, vuelve a escribir "quiero registrarme" en *${data.nombreEvento}*.`;
+  }
+
   addMessage(msg.trim(), "bot");
   renderSidebarEventos();
   refrescarRegistrosYCupos();
@@ -809,6 +931,14 @@ function extraerNombreEventoDeTexto(texto) {
 }
 
 function iniciarConsultaPropia(tipo, nombreFiltro) {
+  if (deptoRecordado) {
+    const intro = tipo === "cancelar"
+      ? (nombreFiltro ? `Vamos a cancelar tu registro a *${nombreFiltro}* (depto ${deptoRecordado}, el mismo de antes).` : `Vamos a revisar tus registros del depto ${deptoRecordado} (el mismo de antes) para que elijas cuál cancelar.`)
+      : (nombreFiltro ? `Voy a revisar si el depto ${deptoRecordado} (el mismo de antes) tiene reserva en *${nombreFiltro}*.` : `Voy a revisar los registros del depto ${deptoRecordado} (el mismo de antes).`);
+    addMessage(`${intro}\n\n_Si no es tu depto, escribe "cambiar depto"._`, "bot");
+    ejecutarConsultaPropia(tipo, nombreFiltro, deptoRecordado);
+    return;
+  }
   consultaEnCurso = { tipo, nombreFiltro, paso: "depto" };
   const intro = tipo === "cancelar"
     ? (nombreFiltro ? `Vamos a cancelar tu registro a *${nombreFiltro}*.` : `Vamos a revisar tus registros para que elijas cuál cancelar.`)
@@ -830,6 +960,7 @@ async function continuarConsultaPropia(texto) {
       return;
     }
     consultaEnCurso.depto = txt;
+    deptoRecordado = txt;
     const { tipo, nombreFiltro, depto } = consultaEnCurso;
     consultaEnCurso = null;
     await ejecutarConsultaPropia(tipo, nombreFiltro, depto);
@@ -989,6 +1120,11 @@ if (chatForm) {
     }
 
     // Detecta intención de autoservicio ANTES del router normal y de la IA
+    if (normalizarTexto(txt) === "cambiar depto" || normalizarTexto(txt) === "olvidar depto") {
+      deptoRecordado = null;
+      addMessage("Listo, olvidé el depto guardado. La próxima vez que lo necesite te lo voy a preguntar de nuevo.", "bot");
+      return;
+    }
     if (detectarIntentCancelarPropio(txt)) {
       iniciarConsultaPropia("cancelar", extraerNombreEventoDeTexto(txt));
       return;
