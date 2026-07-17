@@ -16,7 +16,6 @@ const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7
 // Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con Gemini.
 const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbybUiBe_L9yX1wM4o7j8rfjUi73sUIEc0LLDZmIc9oZmi7RoAae1h6dfVEtupdWv39D/exec";
 
-
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 const DIAS_SEMANA_CORTOS = ["D","L","M","M","J","V","S"];
@@ -517,6 +516,27 @@ function respuestaEventosHoy() {
   return reporte;
 }
 
+function respuestaPorCategoria(categoria) {
+  const cfg = CATEGORIAS[categoria];
+  const eventos = (DATA[categoria] || []).filter(e => e.estado.toLowerCase() === "activo")
+    .sort((a, b) => parseFechaLocal(a.fecha) - parseFechaLocal(b.fecha));
+  if (!eventos.length) return `${cfg ? cfg.emoji : ""} No hay eventos activos en ${cfg ? cfg.labelSidebar.toLowerCase() : categoria} por ahora.`;
+  let reporte = `${cfg ? cfg.emoji : ""} *${cfg ? cfg.labelSidebar : categoria.toUpperCase()}*\n\n`;
+  eventos.forEach(ev => { reporte += tarjetaEventoTexto(ev) + "\n\n"; });
+  return reporte.trim();
+}
+
+// Detecta si el mensaje pregunta por una categoría completa (ej. "eventos sociales",
+// "qué hay en deportivos", "impacto comunitario") y regresa la clave de CATEGORIAS o null.
+function detectarCategoriaEnTexto(texto) {
+  const n = normalizarTexto(texto);
+  if (n.includes("deportiv")) return "Deportivos";
+  if (n.includes("social")) return "Sociales";
+  if (n.includes("cultural")) return "Culturales";
+  if (n.includes("impacto") || n.includes("comunitari")) return "Impacto";
+  return null;
+}
+
 function respuestaAgendaSemanal() {
   const lunes = inicioSemana(new Date());
   const dias = [];
@@ -549,9 +569,30 @@ function respuestaAgendaSemanal() {
   return reporte;
 }
 
+// Palabras demasiado comunes en preguntas de residentes como para servir de pista real
+// (si las dejáramos, "cupo en zumba" y "cupo en yoga" competirían por la palabra "cupo")
+const PALABRAS_IGNORAR_BUSQUEDA = [
+  "el", "la", "los", "las", "de", "del", "en", "hay", "sitio", "cupo", "cupos",
+  "para", "con", "por", "un", "una", "unos", "unas", "info", "informacion",
+  "quiero", "tengo", "ya", "me", "mi", "que", "como", "cuando", "donde",
+  "es", "esta", "estan", "hoy", "lugares", "lugar", "disponible", "disponibles",
+  "reserva", "registrado", "registro", "todavia", "aun", "queda", "quedan"
+];
+
 function buscarEventoPorNombreParcial(consulta) {
   const q = normalizarTexto(consulta);
-  return todosLosEventos().filter(e => e.nombre && q.includes(normalizarTexto(e.nombre)));
+  const palabrasQuery = q.split(/\s+/).filter(w => w.length >= 3 && !PALABRAS_IGNORAR_BUSQUEDA.includes(w));
+  if (!palabrasQuery.length) return [];
+
+  return todosLosEventos().filter(ev => {
+    if (!ev.nombre) return false;
+    const nombreNorm = normalizarTexto(ev.nombre);
+    // Coincidencia directa de frase completa en cualquier dirección (ej. el nombre exacto)
+    if (q.includes(nombreNorm) || nombreNorm.includes(q)) return true;
+    // Coincidencia por al menos una palabra clave compartida (ej. "zumba" dentro de "Clases de Zumba")
+    const palabrasNombre = nombreNorm.split(/\s+/).filter(w => w.length >= 3);
+    return palabrasQuery.some(pw => palabrasNombre.includes(pw));
+  });
 }
 
 // ---------- Flujo de registro conversacional ----------
@@ -871,6 +912,10 @@ function responderMensajeLocal(textoOriginal) {
 
   if (normalizado.includes("hoy")) return respuestaEventosHoy();
   if (normalizado.includes("semana") || normalizado.includes("agenda") || normalizado.includes("programaci")) return respuestaAgendaSemanal();
+
+  const categoriaDetectada = detectarCategoriaEnTexto(texto);
+  if (categoriaDetectada) return respuestaPorCategoria(categoriaDetectada);
+
   if (normalizado.includes("ayuda") || normalizado === "hola") {
     return "👋 ¡Hola! Puedo mostrarte los eventos de hoy, la programación de la semana, ayudarte a registrarte a cualquier evento, decirte si ya tienes una reserva (\"¿tengo reserva en waterpolo?\"), listar todos tus registros (\"mis registros\") o cancelar uno (\"quiero cancelar mi registro\").";
   }
