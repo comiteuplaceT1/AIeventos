@@ -14,7 +14,7 @@ const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7
 
 // ⚠️ COPIA AQUÍ EL LINK DE IMPLEMENTACIÓN DE TU GOOGLE APPS SCRIPT (APLICACIÓN WEB /EXEC)
 // Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con Gemini.
-const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbyJysGNNzJaF7SUaq1oyKAwhXGYz9OYBTCJF3rC094HeD2ljCPKAOPV0wjn0ArJvQ/exec";
+const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbwuLB7Fk8MEMNoKbxxCTsujTLNBKE6GmzjbO7GhOFekWP5kU_dFBb-aXfloCMdQr-FO/exec";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -843,10 +843,12 @@ function renderAdminPanel() {
       <div class="space-y-2">
         <button id="adminBtnCrear" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg py-2.5 transition">➕ Crear evento</button>
         <button id="adminBtnCancelar" class="w-full bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-lg py-2.5 transition">🛑 Cancelar evento</button>
+        <button id="adminBtnBajaResidente" class="w-full bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-lg py-2.5 transition">🙅 Dar de baja a un residente</button>
       </div>
     `;
     document.getElementById("adminBtnCrear").addEventListener("click", () => { adminState.paso = "crear"; renderAdminPanel(); });
     document.getElementById("adminBtnCancelar").addEventListener("click", () => { adminState.paso = "cancelar_categoria"; renderAdminPanel(); });
+    document.getElementById("adminBtnBajaResidente").addEventListener("click", () => { adminState.paso = "baja_categoria"; renderAdminPanel(); });
     return;
   }
 
@@ -1036,6 +1038,72 @@ function renderAdminPanel() {
     document.getElementById("adminBtnConfirmarCancelar").addEventListener("click", confirmarCancelacionDesdeAdmin);
     return;
   }
+
+  // ---- Baja de residente, paso 1: elegir categoría ----
+  if (adminState.paso === "baja_categoria") {
+    body.innerHTML = `
+      <p class="text-sm text-slate-600 mb-3">¿De qué categoría es el evento?</p>
+      <div class="space-y-2">
+        ${Object.keys(CATEGORIAS).map(c => `<button class="admin-cat-btn w-full text-left bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg px-3 py-2.5 transition" data-cat="${c}">${CATEGORIAS[c].emoji} ${CATEGORIAS[c].labelSidebar}</button>`).join("")}
+      </div>
+      <button id="adminBtnVolverMenu3" class="w-full mt-3 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-lg py-2 transition">← Volver</button>
+    `;
+    document.querySelectorAll(".admin-cat-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        adminState.categoria = btn.getAttribute("data-cat");
+        adminState.paso = "baja_evento";
+        renderAdminPanel();
+      });
+    });
+    document.getElementById("adminBtnVolverMenu3").addEventListener("click", () => { adminState.paso = "menu"; renderAdminPanel(); });
+    return;
+  }
+
+  // ---- Baja de residente, paso 2: elegir el evento (activos, con o sin recurrencia) ----
+  if (adminState.paso === "baja_evento") {
+    const activos = (DATA[adminState.categoria] || []).filter(e => e.estado.toLowerCase() === "activo")
+      .sort((a, b) => parseFechaLocal(a.fecha) - parseFechaLocal(b.fecha));
+    body.innerHTML = `
+      <p class="text-sm text-slate-600 mb-3">¿De qué evento quieres dar de baja a un residente?</p>
+      <div class="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
+        ${activos.length ? activos.map(ev => `
+          <button class="admin-ev-btn w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-3 py-2 transition" data-id="${ev.eventoid}">
+            <span class="font-bold text-slate-800 text-sm block">${esRecurrente(ev) ? "🔁 " : ""}${escapeHtml(ev.nombre)}</span>
+            <span class="text-xs text-slate-500">${ev.fecha} · ${horarioTexto(ev)} · ${escapeHtml(ev.ubicacion || "N/A")}</span>
+          </button>`).join("")
+          : `<p class="text-xs text-slate-400">No hay eventos activos en esta categoría.</p>`}
+      </div>
+      <button id="adminBtnVolverCat3" class="w-full mt-3 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-lg py-2 transition">← Volver</button>
+    `;
+    document.querySelectorAll(".admin-ev-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        adminState.evento = activos.find(e => e.eventoid === btn.getAttribute("data-id"));
+        adminState.paso = "baja_depto";
+        renderAdminPanel();
+      });
+    });
+    document.getElementById("adminBtnVolverCat3").addEventListener("click", () => { adminState.paso = "baja_categoria"; renderAdminPanel(); });
+    return;
+  }
+
+  // ---- Baja de residente, paso 3: indicar el depto y confirmar ----
+  if (adminState.paso === "baja_depto") {
+    const ev = adminState.evento;
+    body.innerHTML = `
+      <p class="text-sm text-slate-600 mb-2">Evento: <strong>${escapeHtml(ev.nombre)}</strong>${esRecurrente(ev) ? ` (${recurrenciaTexto(ev)})` : ""}</p>
+      <label class="block text-xs font-bold text-slate-500 mb-1">Número de departamento</label>
+      <input id="fBajaDepto" type="text" placeholder="ej. 3003" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mb-2">
+      <p class="text-[11px] text-slate-400 mb-3">Se cancelarán TODAS las sesiones futuras confirmadas de este depto para este evento (a partir de hoy). Las sesiones ya pasadas no se tocan — quedan como historial.</p>
+      <div class="flex gap-2">
+        <button id="adminBtnVolverEvento3" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg py-2.5 transition">← Volver</button>
+        <button id="adminBtnConfirmarBaja" class="flex-1 bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-lg py-2.5 transition">Dar de baja</button>
+      </div>
+      <div id="bajaResultado" class="mt-3 text-xs"></div>
+    `;
+    document.getElementById("adminBtnVolverEvento3").addEventListener("click", () => { adminState.paso = "baja_evento"; renderAdminPanel(); });
+    document.getElementById("adminBtnConfirmarBaja").addEventListener("click", darDeBajaDesdeAdmin);
+    return;
+  }
 }
 
 async function crearEventoDesdeAdmin() {
@@ -1115,6 +1183,37 @@ async function confirmarCancelacionDesdeAdmin() {
   } catch (err) {
     alert("Error de conexión: " + err.toString());
     if (btn) { btn.disabled = false; btn.textContent = "Confirmar cancelación"; }
+  }
+}
+
+async function darDeBajaDesdeAdmin() {
+  const btn = document.getElementById("adminBtnConfirmarBaja");
+  const resultadoEl = document.getElementById("bajaResultado");
+  const depto = document.getElementById("fBajaDepto").value.trim();
+  if (!depto) { alert("Indica el número de departamento."); return; }
+  if (btn) { if (btn.disabled) return; btn.disabled = true; btn.textContent = "Procesando…"; }
+
+  const ev = adminState.evento;
+  try {
+    const url = `${URL_AGENTE_EVENTOS}?accion=cancelar_registro_depto&pin=${encodeURIComponent(adminState.pin)}&eventoId=${encodeURIComponent(ev.eventoid)}&categoria=${encodeURIComponent(ev.categoria)}&depto=${encodeURIComponent(depto)}`;
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json();
+    if (data.ok) {
+      if (data.totalCanceladas > 0) {
+        const fechas = data.detalle.map(d => formatearFecha(parseFechaLocal(d.fecha))).join(", ");
+        resultadoEl.innerHTML = `<p class="text-emerald-700 font-bold">✅ Se dieron de baja ${data.totalCanceladas} sesión(es) futuras del depto ${depto}: ${fechas}.</p>`;
+      } else {
+        resultadoEl.innerHTML = `<p class="text-slate-500">El depto ${depto} no tenía sesiones futuras confirmadas para este evento.</p>`;
+      }
+      refrescarCuposLive();
+      cargarCsv(URL_REGISTROS_CSV); // refresca en segundo plano, sin bloquear la UI
+    } else {
+      resultadoEl.innerHTML = `<p class="text-red-600 font-bold">${data.error || "No se pudo procesar. Verifica el PIN."}</p>`;
+    }
+  } catch (err) {
+    resultadoEl.innerHTML = `<p class="text-red-600 font-bold">Error de conexión: ${err.toString()}</p>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Dar de baja"; }
   }
 }
 
@@ -1306,4 +1405,4 @@ window.irMesActualCalendario = function() {
 
 inicializar();
 setInterval(inicializar, 60000); // refresca eventos completos cada 60s
-setInterval(refrescarCuposLive, 12000); // refresca SOLO el cupo cada 12s (llamada liviana, sin caché)
+setInterval(refrescarCuposLive, 12000); // refresca SOLO el cupo cada 12s (llamada liviana, sin caché)c
