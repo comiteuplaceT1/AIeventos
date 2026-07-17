@@ -339,7 +339,7 @@ function normalizarEventos(lista, categoria) {
     cupototal: ev["cupototal"] || "0",
     estado: ev["estado"] || "Activo",
     tienecosto: String(ev["tienecosto"] || "").trim().toLowerCase() === "si",
-    diasemana: String(ev["diasemana"] || "").split(",").map(d => d.trim()).filter(d => d),
+    diasemana: String(ev["diassemana"] || "").split(",").map(d => d.trim()).filter(d => d),
     fechafin: ev["fechafin"] || "",
     categoria
   })).filter(ev => ev.eventoid);
