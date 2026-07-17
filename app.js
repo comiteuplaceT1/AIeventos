@@ -24,11 +24,13 @@ const DIAS_SEMANA_LARGOS = ["Domingo","Lunes","Martes","Miércoles","Jueves","Vi
 // ⚠️ AJUSTA esta lista con los valores exactos de tus áreas/amenidades — se usa
 // como selector de "Ubicación" al crear un evento desde el Panel del Comité.
 const UBICACIONES = [
-  "Alberca P6",
-  "Jardín Asadores P6",
-  "Salón Yoga P6",
+  "Alberca / Jacuzzi P6",
+  "Chapoteadero P6",
+  "Jardín P6",
+  "Cancha Multiusos P6",
   "Coffee Place PB",
-  "Skylounge P31",
+  "Lobby PB",
+  "Salón P31",
   "Terraza P31",
   "Skylounge P31"
 ];
@@ -176,14 +178,16 @@ function cupoInfo(evento) {
   const total = Number(evento.cupototal) || 0;
   const disponibles = Math.max(total - confirmados, 0);
   const lleno = confirmados >= total;
-  const texto = lleno ? `${total}/${total} Lleno` : `${confirmados}/${total}`;
+  const texto = lleno ? "Cupo Lleno" : `Cupo: ${confirmados}/${total}`;
   return { confirmados, total, disponibles, lleno, texto };
 }
 
 // ---------- Carga de datos e Interfaz Lateral Dinámica ----------
 async function cargarCsv(url) {
   try {
-    const res = await fetch(url, { cache: "no-store" });
+    const separador = url.includes("?") ? "&" : "?";
+    const urlSinCache = `${url}${separador}_ts=${Date.now()}`;
+    const res = await fetch(urlSinCache, { cache: "no-store" });
     const texto = await res.text();
     return csvAObjetos(texto);
   } catch (e) {
@@ -249,6 +253,23 @@ async function inicializar() {
   }
 }
 
+// Reconstruye SOLO los acordeones del sidebar (badges de cupo) sin recargar todo ni
+// reescribir el mensaje de bienvenida. Se usa tras un registro para reflejar el cupo
+// nuevo de inmediato, sin esperar el refresco automático cada 60s.
+function renderSidebarEventos() {
+  const scrollContainer = document.getElementById("deportivosList")?.parentNode?.parentNode;
+  if (!scrollContainer) return;
+  scrollContainer.innerHTML = "";
+  Object.keys(CATEGORIAS).forEach(categoria => {
+    const cfg = CATEGORIAS[categoria];
+    const idLista = `${categoria.toLowerCase()}Accordion`;
+    const div = crearSeccionMenu(cfg.labelSidebar, idLista);
+    scrollContainer.appendChild(div);
+    const eventosActivos = DATA[categoria].filter(e => e.estado.toLowerCase() === "activo");
+    inyectarSubmenuEventos(idLista, eventosActivos, categoria, cfg.emoji);
+  });
+}
+
 function normalizarEventos(lista, categoria) {
   return lista.map(ev => ({
     eventoid: ev["eventoid"] || ev["EventoID"] || "",
@@ -304,7 +325,7 @@ function tarjetaEventoTexto(evento, incluirBoton = true) {
   const info = cupoInfo(evento);
   const cfg = CATEGORIAS[evento.categoria];
   const fecha = evento.fecha ? formatearFecha(parseFechaLocal(evento.fecha)) : "Sin fecha";
-  const badgeCupo = info.lleno ? `🔴 *${info.texto}*` : `🟢 *${info.texto} lugares disponibles*`;
+  const badgeCupo = info.lleno ? "🔴 *Cupo Lleno*" : `🟢 *${info.texto}* (${info.disponibles} disponible${info.disponibles !== 1 ? "s" : ""})`;
 
   let lineas = [
     `${cfg ? cfg.emoji : "🎟️"} *${evento.nombre}*`,
@@ -321,7 +342,7 @@ function tarjetaEventoTexto(evento, incluirBoton = true) {
     if (info.lleno) {
       texto += `\n<button disabled class="mt-2 block text-[11px] font-bold text-slate-400 bg-slate-100 rounded-lg px-3 py-1.5 cursor-not-allowed">Cupo lleno</button>`;
     } else {
-      texto += `\n<button onclick="window.iniciarRegistro('${evento.eventoid}','${evento.categoria}', '${escapeHtml(evento.nombre).replace(/'/g, "\\'")}')" class="mt-2 block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">✅ Registrarme</button>`;
+      texto += `\n<button onclick="if(!this.disabled){this.disabled=true;this.textContent='Un momento…';window.iniciarRegistro('${evento.eventoid}','${evento.categoria}', '${escapeHtml(evento.nombre).replace(/'/g, "\\'")}');}" class="mt-2 block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition disabled:opacity-50">✅ Registrarme</button>`;
     }
   }
   return texto;
@@ -391,7 +412,7 @@ window.iniciarRegistro = function(eventoId, categoria, nombreEvento) {
   if (evento) {
     const info = cupoInfo(evento);
     if (info.lleno) {
-      addMessage(`🔴 Lo siento, *${nombreEvento}* ya alcanzó su cupo máximo (${info.texto}). No hay lugares disponibles por el momento.`, "bot");
+      addMessage(`🔴 Lo siento, *${nombreEvento}* ya alcanzó su cupo máximo (${info.confirmados}/${info.total}). No hay lugares disponibles por el momento.`, "bot");
       return;
     }
   }
@@ -455,6 +476,7 @@ async function confirmarRegistroBackend(eventoId, categoria, depto, nombre) {
         nombre: x["nombre"] || "",
         estado: x["estado"] || ""
       })));
+      renderSidebarEventos();
     } else if (data.moroso) {
       addMessage(`🚫 ${data.error}`, "bot");
     } else if (data.cupoLleno) {
@@ -705,7 +727,7 @@ function renderAdminPanel() {
         <p>Categoría: ${ev.categoria}</p>
         <p>Fecha: ${fecha} · ${ev.horainicio || "N/A"} - ${ev.horafin || "N/A"}</p>
         <p>Lugar: ${escapeHtml(ev.ubicacion || "N/A")}</p>
-        <p>Cupo actual: <strong>${info.texto}</strong></p>
+        <p>${info.texto}</p>
       </div>
       <p class="text-xs text-slate-500 mb-3">Esta acción no se puede deshacer desde aquí. Los residentes ya registrados no reciben notificación automática — avísales por otro medio si aplica.</p>
       <div class="flex gap-2">
@@ -720,6 +742,9 @@ function renderAdminPanel() {
 }
 
 async function crearEventoDesdeAdmin() {
+  const btn = document.getElementById("adminBtnGuardarEvento");
+  if (btn) { if (btn.disabled) return; btn.disabled = true; btn.textContent = "Guardando…"; }
+
   const categoria = document.getElementById("fCategoria").value;
   const nombre = document.getElementById("fNombre").value.trim();
   const descripcion = document.getElementById("fDescripcion").value.trim();
@@ -729,7 +754,11 @@ async function crearEventoDesdeAdmin() {
   const ubicacion = document.getElementById("fUbicacion").value;
   const cupoTotal = document.getElementById("fCupo").value || "0";
 
-  if (!nombre || !fecha) { alert("Nombre y fecha son obligatorios."); return; }
+  if (!nombre || !fecha) {
+    alert("Nombre y fecha son obligatorios.");
+    if (btn) { btn.disabled = false; btn.textContent = "Crear evento"; }
+    return;
+  }
 
   try {
     const url = `${URL_AGENTE_EVENTOS}?accion=crear_evento&pin=${encodeURIComponent(adminState.pin)}&categoria=${encodeURIComponent(categoria)}&nombre=${encodeURIComponent(nombre)}&descripcion=${encodeURIComponent(descripcion)}&fecha=${encodeURIComponent(fecha)}&horaInicio=${encodeURIComponent(horaInicio)}&horaFin=${encodeURIComponent(horaFin)}&ubicacion=${encodeURIComponent(ubicacion)}&cupoTotal=${encodeURIComponent(cupoTotal)}`;
@@ -741,13 +770,18 @@ async function crearEventoDesdeAdmin() {
       inicializar();
     } else {
       alert(data.error || "No se pudo crear el evento. Verifica el PIN.");
+      if (btn) { btn.disabled = false; btn.textContent = "Crear evento"; }
     }
   } catch (err) {
     alert("Error de conexión: " + err.toString());
+    if (btn) { btn.disabled = false; btn.textContent = "Crear evento"; }
   }
 }
 
 async function confirmarCancelacionDesdeAdmin() {
+  const btn = document.getElementById("adminBtnConfirmarCancelar");
+  if (btn) { if (btn.disabled) return; btn.disabled = true; btn.textContent = "Cancelando…"; }
+
   const ev = adminState.evento;
   try {
     const url = `${URL_AGENTE_EVENTOS}?accion=cancelar_evento&pin=${encodeURIComponent(adminState.pin)}&categoria=${encodeURIComponent(ev.categoria)}&eventoId=${encodeURIComponent(ev.eventoid)}`;
@@ -759,9 +793,11 @@ async function confirmarCancelacionDesdeAdmin() {
       inicializar();
     } else {
       alert(data.error || "No se pudo cancelar el evento. Verifica el PIN.");
+      if (btn) { btn.disabled = false; btn.textContent = "Confirmar cancelación"; }
     }
   } catch (err) {
     alert("Error de conexión: " + err.toString());
+    if (btn) { btn.disabled = false; btn.textContent = "Confirmar cancelación"; }
   }
 }
 
@@ -884,7 +920,7 @@ function mostrarDetalleCalendario(item) {
   html += `<p class="text-xs text-slate-600 mb-1.5"><strong class="text-slate-800">Fecha:</strong> ${fecha}</p>`;
   html += `<p class="text-xs text-slate-600 mb-1.5"><strong class="text-slate-800">Horario:</strong> ${escapeHtml(item.horainicio || "N/A")} - ${escapeHtml(item.horafin || "N/A")}</p>`;
   html += `<p class="text-xs text-slate-600 mb-1.5"><strong class="text-slate-800">Lugar:</strong> ${escapeHtml(item.ubicacion || "N/A")}</p>`;
-  html += `<p class="text-xs mb-1.5"><strong class="text-slate-800">Cupo:</strong> <span class="font-bold ${info.lleno ? "text-red-500" : "text-emerald-600"}">${info.lleno ? "🔴" : "🟢"} ${info.texto}</span></p>`;
+  html += `<p class="text-xs mb-1.5"><span class="font-bold ${info.lleno ? "text-red-500" : "text-emerald-600"}">${info.lleno ? "🔴" : "🟢"} ${info.texto}</span></p>`;
   if (item.descripcion) html += `<p class="text-xs text-slate-600 mb-2"><strong class="text-slate-800">Descripción:</strong> ${escapeHtml(item.descripcion)}</p>`;
 
   if (info.lleno) {
