@@ -180,12 +180,26 @@ function contarConfirmados(eventoId) {
   ).length;
 }
 function cupoInfo(evento) {
+  const cupoRaw = (evento.cupototal || "").toString().trim().toLowerCase();
+  const sinLimite = cupoRaw === "" || cupoRaw === "sin límite" || cupoRaw === "sin limite";
   const confirmados = contarConfirmados(evento.eventoid);
+
+  if (sinLimite) {
+    return {
+      confirmados,
+      total: null,
+      disponibles: null,
+      lleno: false,
+      sinLimite: true,
+      texto: `Sin límite (${confirmados} registrado${confirmados !== 1 ? "s" : ""})`
+    };
+  }
+
   const total = Number(evento.cupototal) || 0;
   const disponibles = Math.max(total - confirmados, 0);
   const lleno = confirmados >= total;
   const texto = lleno ? "Cupo Lleno" : `Cupo: ${confirmados}/${total}`;
-  return { confirmados, total, disponibles, lleno, texto };
+  return { confirmados, total, disponibles, lleno, sinLimite: false, texto };
 }
 
 // ---------- Carga de datos e Interfaz Lateral Dinámica ----------
@@ -293,6 +307,7 @@ function normalizarEventos(lista, categoria) {
     ubicacion: ev["ubicacion"] || "",
     cupototal: ev["cupototal"] || "0",
     estado: ev["estado"] || "Activo",
+    tienecosto: String(ev["tienecosto"] || "").trim().toLowerCase() === "si",
     categoria
   })).filter(ev => ev.eventoid);
 }
@@ -332,21 +347,29 @@ function inyectarSubmenuEventos(idContenedor, eventos, categoria, emoji) {
   });
 }
 
+function horarioTexto(evento) {
+  if (!evento.horainicio && !evento.horafin) return "Por confirmar";
+  return `${evento.horainicio || "N/A"} - ${evento.horafin || "N/A"}`;
+}
+
 // ---------- Tarjetas de evento (formato chat) ----------
 function tarjetaEventoTexto(evento, incluirBoton = true) {
   const info = cupoInfo(evento);
   const cfg = CATEGORIAS[evento.categoria];
   const fecha = evento.fecha ? formatearFecha(parseFechaLocal(evento.fecha)) : "Sin fecha";
-  const badgeCupo = info.lleno ? "🔴 *Cupo Lleno*" : `🟢 *${info.texto}* (${info.disponibles} disponible${info.disponibles !== 1 ? "s" : ""})`;
+  const badgeCupo = info.sinLimite
+    ? `🟢 *${info.texto}*`
+    : (info.lleno ? "🔴 *Cupo Lleno*" : `🟢 *${info.texto}* (${info.disponibles} disponible${info.disponibles !== 1 ? "s" : ""})`);
 
   let lineas = [
     `${cfg ? cfg.emoji : "🎟️"} *${evento.nombre}*`,
     `📁 Categoría: ${evento.categoria}`,
     `📅 Fecha: ${fecha}`,
-    `🕐 Horario: ${evento.horainicio || "N/A"} - ${evento.horafin || "N/A"}`,
+    `🕐 Horario: ${horarioTexto(evento)}`,
     `📍 Lugar: ${evento.ubicacion || "N/A"}`,
     `👥 Cupo: ${badgeCupo}`,
   ];
+  if (evento.tienecosto) lineas.push(`💰 *Este evento tiene costo* (consulta el monto con el Comité)`);
   if (evento.descripcion) lineas.push(`📝 ${evento.descripcion}`);
 
   let texto = lineas.join("\n");
@@ -404,7 +427,8 @@ function respuestaAgendaSemanal() {
       eventosDia.forEach(ev => {
         const info = cupoInfo(ev);
         const cfg = CATEGORIAS[ev.categoria];
-        reporte += `${cfg ? cfg.emoji : "🎟️"} *${ev.nombre}* — ${ev.horainicio || "N/A"}h @ ${ev.ubicacion || "N/A"} — ${info.lleno ? "🔴 " : "🟢 "}${info.texto}\n`;
+        const costoTag = ev.tienecosto ? " · 💰 con costo" : "";
+        reporte += `${cfg ? cfg.emoji : "🎟️"} *${ev.nombre}* — ${horarioTexto(ev)} @ ${ev.ubicacion || "N/A"}${costoTag} — ${info.lleno ? "🔴 " : "🟢 "}${info.texto}\n`;
         reporte += `<button onclick="window.iniciarRegistro('${ev.eventoid}','${ev.categoria}', '${escapeHtml(ev.nombre).replace(/'/g, "\\'")}')" ${info.lleno ? "disabled" : ""} class="mt-0.5 mb-1.5 inline-block text-[11px] font-bold ${info.lleno ? 'text-slate-400 bg-slate-100 cursor-not-allowed' : 'text-brand-600 bg-brand-50 hover:bg-brand-100'} rounded-lg px-2 py-1 transition">${info.lleno ? "Cupo lleno" : "✅ Registrarme"}</button>\n`;
       });
       reporte += "\n";
@@ -477,7 +501,12 @@ async function confirmarRegistroBackend(eventoId, categoria, depto, nombre) {
     }
 
     if (data.ok) {
-      let extra = `\n\n👥 Cupo actualizado: ${data.cupoActual}/${data.cupoTotal} — ${data.lugaresDisponibles} lugar(es) disponible(s).`;
+      let extra;
+      if (data.sinLimite) {
+        extra = `\n\n👥 Este evento no tiene límite de cupo — llevas ${data.cupoActual} registro(s) confirmado(s).`;
+      } else {
+        extra = `\n\n👥 Cupo actualizado: ${data.cupoActual}/${data.cupoTotal} — ${data.lugaresDisponibles} lugar(es) disponible(s).`;
+      }
       if (data.huellasMaxDepto) extra += `\n🏠 Depto ${depto}: ${data.huellasUsadasDepto}/${data.huellasMaxDepto} registros usados para este evento.`;
       addMessage(`✅ *${data.mensaje}*${extra}`, "bot");
       // Actualiza el cupo en vivo de inmediato con el valor que ya regresó el registro
@@ -656,7 +685,13 @@ function renderAdminPanel() {
           <label class="block text-xs font-bold text-slate-500 mb-1">Fecha</label>
           <input id="fFecha" type="date" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
         </div>
-        <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="flex items-center gap-2 text-xs font-bold text-slate-500 cursor-pointer">
+            <input id="fSinHora" type="checkbox" class="rounded border-slate-300 text-brand-600 focus:ring-brand-500">
+            Sin hora específica (ej. eventos de fin de mes)
+          </label>
+        </div>
+        <div id="wrapperHoras" class="grid grid-cols-2 gap-2">
           <div>
             <label class="block text-xs font-bold text-slate-500 mb-1">Hora inicio</label>
             <input id="fHoraInicio" type="time" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
@@ -673,6 +708,18 @@ function renderAdminPanel() {
           </select>
         </div>
         <div>
+          <label class="flex items-center gap-2 text-xs font-bold text-slate-500 cursor-pointer">
+            <input id="fTieneCosto" type="checkbox" class="rounded border-slate-300 text-brand-600 focus:ring-brand-500">
+            Este evento tiene costo (no se pide el monto, solo se avisa en el detalle)
+          </label>
+        </div>
+        <div>
+          <label class="flex items-center gap-2 text-xs font-bold text-slate-500 cursor-pointer">
+            <input id="fSinCupo" type="checkbox" class="rounded border-slate-300 text-brand-600 focus:ring-brand-500">
+            Sin límite de cupo (ej. donativos, colectas)
+          </label>
+        </div>
+        <div id="wrapperCupo">
           <label class="block text-xs font-bold text-slate-500 mb-1">Cupo total</label>
           <input id="fCupo" type="number" min="1" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
         </div>
@@ -682,6 +729,27 @@ function renderAdminPanel() {
         <button id="adminBtnGuardarEvento" class="flex-1 bg-brand-600 hover:bg-brand-700 text-white text-sm font-bold rounded-lg py-2.5 transition">Crear evento</button>
       </div>
     `;
+    document.getElementById("fSinHora").addEventListener("change", (e) => {
+      const wrapper = document.getElementById("wrapperHoras");
+      const hi = document.getElementById("fHoraInicio");
+      const hf = document.getElementById("fHoraFin");
+      if (e.target.checked) {
+        wrapper.classList.add("opacity-40", "pointer-events-none");
+        hi.value = ""; hf.value = "";
+      } else {
+        wrapper.classList.remove("opacity-40", "pointer-events-none");
+      }
+    });
+    document.getElementById("fSinCupo").addEventListener("change", (e) => {
+      const wrapper = document.getElementById("wrapperCupo");
+      const cupoInput = document.getElementById("fCupo");
+      if (e.target.checked) {
+        wrapper.classList.add("opacity-40", "pointer-events-none");
+        cupoInput.value = "";
+      } else {
+        wrapper.classList.remove("opacity-40", "pointer-events-none");
+      }
+    });
     document.getElementById("adminBtnVolverMenu1").addEventListener("click", () => { adminState.paso = "menu"; renderAdminPanel(); });
     document.getElementById("adminBtnGuardarEvento").addEventListener("click", crearEventoDesdeAdmin);
     return;
@@ -717,7 +785,7 @@ function renderAdminPanel() {
         ${activos.length ? activos.map(ev => `
           <button class="admin-ev-btn w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-3 py-2 transition" data-id="${ev.eventoid}">
             <span class="font-bold text-slate-800 text-sm block">${escapeHtml(ev.nombre)}</span>
-            <span class="text-xs text-slate-500">${ev.fecha} · ${ev.horainicio || "N/A"}h · ${escapeHtml(ev.ubicacion || "N/A")}</span>
+            <span class="text-xs text-slate-500">${ev.fecha} · ${horarioTexto(ev)} · ${escapeHtml(ev.ubicacion || "N/A")}</span>
           </button>`).join("")
           : `<p class="text-xs text-slate-400">No hay eventos activos en esta categoría.</p>`}
       </div>
@@ -744,7 +812,7 @@ function renderAdminPanel() {
       <div class="bg-red-50 border border-red-100 rounded-lg p-3 mb-3 text-sm text-slate-700 space-y-1">
         <p class="font-bold text-slate-800">${escapeHtml(ev.nombre)}</p>
         <p>Categoría: ${ev.categoria}</p>
-        <p>Fecha: ${fecha} · ${ev.horainicio || "N/A"} - ${ev.horafin || "N/A"}</p>
+        <p>Fecha: ${fecha} · ${horarioTexto(ev)}</p>
         <p>Lugar: ${escapeHtml(ev.ubicacion || "N/A")}</p>
         <p>${info.texto}</p>
       </div>
@@ -771,16 +839,23 @@ async function crearEventoDesdeAdmin() {
   const horaInicio = document.getElementById("fHoraInicio").value;
   const horaFin = document.getElementById("fHoraFin").value;
   const ubicacion = document.getElementById("fUbicacion").value;
-  const cupoTotal = document.getElementById("fCupo").value || "0";
+  const sinCupo = document.getElementById("fSinCupo").checked;
+  const cupoTotal = sinCupo ? "" : (document.getElementById("fCupo").value || "0");
+  const tieneCosto = document.getElementById("fTieneCosto").checked;
 
   if (!nombre || !fecha) {
     alert("Nombre y fecha son obligatorios.");
     if (btn) { btn.disabled = false; btn.textContent = "Crear evento"; }
     return;
   }
+  if (!sinCupo && (!cupoTotal || Number(cupoTotal) <= 0)) {
+    alert("Indica un cupo total mayor a 0, o marca \"Sin límite de cupo\".");
+    if (btn) { btn.disabled = false; btn.textContent = "Crear evento"; }
+    return;
+  }
 
   try {
-    const url = `${URL_AGENTE_EVENTOS}?accion=crear_evento&pin=${encodeURIComponent(adminState.pin)}&categoria=${encodeURIComponent(categoria)}&nombre=${encodeURIComponent(nombre)}&descripcion=${encodeURIComponent(descripcion)}&fecha=${encodeURIComponent(fecha)}&horaInicio=${encodeURIComponent(horaInicio)}&horaFin=${encodeURIComponent(horaFin)}&ubicacion=${encodeURIComponent(ubicacion)}&cupoTotal=${encodeURIComponent(cupoTotal)}`;
+    const url = `${URL_AGENTE_EVENTOS}?accion=crear_evento&pin=${encodeURIComponent(adminState.pin)}&categoria=${encodeURIComponent(categoria)}&nombre=${encodeURIComponent(nombre)}&descripcion=${encodeURIComponent(descripcion)}&fecha=${encodeURIComponent(fecha)}&horaInicio=${encodeURIComponent(horaInicio)}&horaFin=${encodeURIComponent(horaFin)}&ubicacion=${encodeURIComponent(ubicacion)}&cupoTotal=${encodeURIComponent(cupoTotal)}&sinCupo=${sinCupo ? "1" : "0"}&tieneCosto=${tieneCosto ? "1" : "0"}`;
     const res = await fetch(url, { cache: "no-store" });
     const data = await res.json();
     if (data.ok) {
@@ -915,7 +990,7 @@ function renderVistaDia(dia) {
       calendarioItemsActuales.push(item);
       return `<div class="calendario-item cursor-pointer border ${cfg ? cfg.colorDia : "bg-slate-50 border-slate-200"} rounded-lg px-3 py-2 mb-2 hover:opacity-80 transition" data-idx="${idxGlobal}">
         <p class="text-sm font-bold text-slate-800">${cfg ? cfg.emoji : ""} ${escapeHtml(item.nombre)}</p>
-        <p class="text-xs text-slate-500">${item.categoria} · ${item.horainicio || "N/A"}h · ${item.ubicacion || "N/A"}</p>
+        <p class="text-xs text-slate-500">${item.categoria} · ${horarioTexto(item)} · ${item.ubicacion || "N/A"}</p>
         <p class="text-xs font-bold ${info.lleno ? "text-red-500" : "text-emerald-600"} mt-0.5">${info.lleno ? "🔴" : "🟢"} ${info.texto}</p>
       </div>`;
     }).join("");
@@ -937,8 +1012,9 @@ function mostrarDetalleCalendario(item) {
   let html = `<p class="text-sm font-bold text-slate-800 mb-2">${cfg ? cfg.emoji : ""} ${escapeHtml(item.nombre)}</p>`;
   html += `<p class="text-xs text-slate-600 mb-1.5"><strong class="text-slate-800">Categoría:</strong> ${escapeHtml(item.categoria)}</p>`;
   html += `<p class="text-xs text-slate-600 mb-1.5"><strong class="text-slate-800">Fecha:</strong> ${fecha}</p>`;
-  html += `<p class="text-xs text-slate-600 mb-1.5"><strong class="text-slate-800">Horario:</strong> ${escapeHtml(item.horainicio || "N/A")} - ${escapeHtml(item.horafin || "N/A")}</p>`;
+  html += `<p class="text-xs text-slate-600 mb-1.5"><strong class="text-slate-800">Horario:</strong> ${horarioTexto(item)}</p>`;
   html += `<p class="text-xs text-slate-600 mb-1.5"><strong class="text-slate-800">Lugar:</strong> ${escapeHtml(item.ubicacion || "N/A")}</p>`;
+  if (item.tienecosto) html += `<p class="text-xs font-bold text-amber-600 mb-1.5">💰 Este evento tiene costo (consulta el monto con el Comité)</p>`;
   html += `<p class="text-xs mb-1.5"><span class="font-bold ${info.lleno ? "text-red-500" : "text-emerald-600"}">${info.lleno ? "🔴" : "🟢"} ${info.texto}</span></p>`;
   if (item.descripcion) html += `<p class="text-xs text-slate-600 mb-2"><strong class="text-slate-800">Descripción:</strong> ${escapeHtml(item.descripcion)}</p>`;
 
