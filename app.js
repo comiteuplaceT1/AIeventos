@@ -14,7 +14,7 @@ const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7
 
 // ⚠️ COPIA AQUÍ EL LINK DE IMPLEMENTACIÓN DE TU GOOGLE APPS SCRIPT (APLICACIÓN WEB /EXEC)
 // Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con Gemini.
-const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbzKJRviGzvBfOgmzaW8RCtrV5WMPZJy6LKFvtcJyJvBbD3Z2on-2qNXOXr9XGUSlXsN/exec";;
+const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbzKJRviGzvBfOgmzaW8RCtrV5WMPZJy6LKFvtcJyJvBbD3Z2on-2qNXOXr9XGUSlXsN/exec";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -414,14 +414,14 @@ function recurrenciaTexto(evento) {
 
 function crearSeccionMenu(titulo, idLista) {
   const container = document.createElement("div");
-  container.className = "mb-4 border border-slate-100 rounded-xl overflow-hidden bg-slate-50/50";
+  container.className = "mb-4 border border-slate-100 rounded-xl bg-slate-50/50";
   container.innerHTML = `
-    <button type="button" class="w-full flex items-center justify-between px-3 py-3 text-left font-bold text-xs uppercase tracking-wider text-slate-500 hover:bg-slate-100/80 transition"
+    <button type="button" class="w-full flex items-center justify-between px-3 py-3 text-left font-bold text-xs uppercase tracking-wider text-slate-500 hover:bg-slate-100/80 rounded-t-xl transition"
             onclick="document.getElementById('${idLista}').classList.toggle('hidden')">
       <span>${titulo}</span>
       <span class="text-[10px] text-slate-400">▼</span>
     </button>
-    <div id="${idLista}" class="hidden p-2 space-y-1 bg-white border-t border-slate-100"></div>
+    <div id="${idLista}" class="hidden p-2 space-y-1 bg-white border-t border-slate-100 rounded-b-xl"></div>
   `;
   return container;
 }
@@ -442,8 +442,15 @@ function inyectarSubmenuEventos(idContenedor, eventos, categoria, emoji) {
     const badgeLleno = recurrente ? false : cupoInfo(evento, evento.fecha).lleno;
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "w-full text-left px-3 py-2 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-lg transition flex items-center justify-between gap-2 font-medium border-l-2 border-transparent hover:border-brand-500";
-    btn.innerHTML = `<span class="truncate">${emoji} ${escapeHtml(evento.nombre)}</span><span class="text-[10px] font-bold ${badgeLleno ? 'text-red-500' : (recurrente ? 'text-indigo-600' : 'text-emerald-600')} shrink-0">${badgeTexto}</span>`;
+    btn.className = "group relative w-full text-left px-3 py-2 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-lg transition flex items-center justify-between gap-2 font-medium border-l-2 border-transparent hover:border-brand-500";
+    btn.innerHTML = `<span class="truncate">${emoji} ${escapeHtml(evento.nombre)}</span><span class="text-[10px] font-bold ${badgeLleno ? 'text-red-500' : (recurrente ? 'text-indigo-600' : 'text-emerald-600')} shrink-0">${badgeTexto}</span>
+      <span class="pointer-events-none absolute left-1 right-1 bottom-[calc(100%+6px)] z-50 hidden group-hover:flex justify-center">
+        <span class="relative max-w-[240px] bg-slate-900 text-white text-[11px] font-semibold leading-snug text-center rounded-lg px-2.5 py-1.5 shadow-lg whitespace-normal break-words">
+          ${escapeHtml(evento.nombre)}
+          <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900"></span>
+        </span>
+      </span>`;
+    btn.title = evento.nombre;
     btn.onclick = () => mostrarTarjetaEventoEnChat(evento);
     contenedor.appendChild(btn);
   });
@@ -603,7 +610,7 @@ function respuestaAgendaSemanal() {
   }
   const eventosActivos = todosLosEventos().filter(e => e.estado.toLowerCase() === "activo");
 
-  let reporte = "📅 *PROGRAMACIÓN DE EVENTOS DE LA SEMANA*\n\n";
+  let reporte = "📅 *EVENTOS DE LA SEMANA*\n\n";
   dias.forEach(f => {
     const nombreDia = DIAS_SEMANA_LARGOS[f.getDay()];
     const eventosDia = eventosActivos.filter(e => esOcurrenciaEnFecha(e, f));
@@ -1174,7 +1181,8 @@ function tipSiguientePaso() {
 // de casi todas las respuestas informativas (tipSiguientePaso).
 function mensajeBotonesBienvenida() {
   return `<button onclick="window.handleQuickAction('Ver eventos de hoy')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">🎈 Eventos de hoy</button>`
-    + `<button onclick="window.handleQuickAction('Ver programación de eventos de la semana')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg px-3 py-1.5 transition">📅 Programación de la semana</button>`
+    + `<button onclick="window.handleQuickAction('Ver eventos de la semana')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg px-3 py-1.5 transition">📅 Eventos de la Semana</button>`
+    + `<button onclick="window.abrirModalCalendario()" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg px-3 py-1.5 transition">📆 Calendario Mensual</button>`
     + `<button onclick="window.handleQuickAction('Mis registros')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-violet-600 hover:bg-violet-700 rounded-lg px-3 py-1.5 transition">📋 Mis registros</button>`
     + `<button onclick="window.handleQuickAction('Cancelar mi registro')" class="mb-1.5 inline-block text-[11px] font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg px-3 py-1.5 transition">🗑️ Cancelar un registro</button>`;
 }
@@ -1319,7 +1327,7 @@ function responderMensajeLocal(textoOriginal) {
   if (categoriaDetectada) return respuestaPorCategoria(categoriaDetectada);
 
   if (normalizado.includes("ayuda") || normalizado === "hola") {
-    return `👋 ¡Hola! Esto es lo que puedo hacer por ti:\n\n🎈 *"Eventos de hoy"* — qué hay programado hoy\n📅 *"Programación de la semana"* — agenda completa de lunes a domingo\n🔍 El *nombre de un evento* (ej. "días y horario de Zumba") — para ver cupo, fecha y horario\n✅ *"Quiero registrarme en [evento]"* o usa el botón *Registrarme* de cualquier tarjeta\n📋 *"Mis registros"* — ver a qué estás inscrito\n🗑️ *"Cancelar mi registro"* — dar de baja una inscripción\n\n📂 También puedes explorar el menú de la izquierda por categoría para ver el detalle completo de cualquier evento.\n\n¿Con cuál empezamos?` + "\n\n" + mensajeBotonesBienvenida();
+    return `👋 ¡Hola! Esto es lo que puedo hacer por ti:\n\n🎈 *"Eventos de hoy"* — qué hay programado hoy\n📅 *"Eventos de la Semana"* — agenda completa de lunes a domingo\n🔍 El *nombre de un evento* (ej. "días y horario de Zumba") — para ver cupo, fecha y horario\n✅ *"Quiero registrarme en [evento]"* o usa el botón *Registrarme* de cualquier tarjeta\n📋 *"Mis registros"* — ver a qué estás inscrito\n🗑️ *"Cancelar mi registro"* — dar de baja una inscripción\n\n📂 También puedes explorar el menú de la izquierda por categoría para ver el detalle completo de cualquier evento.\n\n¿Con cuál empezamos?` + "\n\n" + mensajeBotonesBienvenida();
   }
 
   return null; // sin match local (o mención del evento sin intención operativa) -> se consulta a la IA
@@ -1363,7 +1371,7 @@ async function procesarMensajeUsuario(txt) {
     return;
   }
 
-  const respuestaSinMatch = `🤔 No estoy seguro de haber entendido eso. Puedo ayudarte con:\n\n🎈 *"Eventos de hoy"* — qué hay programado hoy\n📅 *"Programación de la semana"* — agenda completa\n🔍 El *nombre de un evento* (ej. "días y horario de Zumba")\n✅ *"Quiero registrarme en [evento]"*\n📋 *"Mis registros"*\n🗑️ *"Cancelar mi registro"*\n\n📂 También puedes usar el menú de la izquierda por categoría.\n\n¿Qué te gustaría hacer?` + "\n\n" + mensajeBotonesBienvenida();
+  const respuestaSinMatch = `🤔 No estoy seguro de haber entendido eso. Puedo ayudarte con:\n\n🎈 *"Eventos de hoy"* — qué hay programado hoy\n📅 *"Eventos de la Semana"* — agenda completa\n🔍 El *nombre de un evento* (ej. "días y horario de Zumba")\n✅ *"Quiero registrarme en [evento]"*\n📋 *"Mis registros"*\n🗑️ *"Cancelar mi registro"*\n\n📂 También puedes usar el menú de la izquierda por categoría.\n\n¿Qué te gustaría hacer?` + "\n\n" + mensajeBotonesBienvenida();
   setTimeout(() => { addMessage(respuestaSinMatch, "bot"); }, 300);
 }
 
