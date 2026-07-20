@@ -288,7 +288,7 @@ async function inicializar() {
     refrescarCuposLive();
 
     if (messagesEl && messagesEl.children.length === 0) {
-      addMessage(`👋 *¡Hola! Bienvenido a Eventos Comunitarios de Uplace.*\n\nSoy tu *Agente IA de Eventos*. Aquí puedes:\n\n🎈 Ver los eventos de *hoy* o de la *semana*\n🔍 Preguntar por un evento específico (ej. "¿qué días y horario tiene Zumba?")\n✅ *Registrarte* directamente desde el chat\n📋 Consultar *tus registros* actuales\n🗑️ *Cancelar* un registro\n\nElige una opción o escríbeme lo que necesites:`, "bot");
+      addMessage(`👋 *¡Hola! Bienvenido a Eventos Comunitarios de Uplace.*\n\nSoy tu *Agente IA de Eventos*. Aquí puedes:\n\n🎈 Ver los eventos de *hoy* o de la *semana*\n🔍 Preguntar por un evento específico (ej. "¿qué días y horario tiene Zumba?")\n✅ *Registrarte* directamente desde el chat\n📋 Consultar *tus registros* actuales\n🗑️ *Cancelar* un registro\n\n📂 También puedes explorar el menú de la izquierda por categoría para ver el detalle completo de cualquier evento.\n\nElige una opción o escríbeme lo que necesites:`, "bot");
       addMessage(mensajeBotonesBienvenida(), "bot");
     }
   } catch (error) {
@@ -500,17 +500,51 @@ function tarjetaEventoTexto(evento, incluirBoton = true, fechaSesion = null) {
 
   let texto = lineas.join("\n");
   if (incluirBoton) {
-    const infoBoton = fechaSesion || !recurrente ? cupoInfo(evento, fechaSesion || evento.fecha) : null;
-    const bloqueado = infoBoton ? infoBoton.lleno : false;
-    if (bloqueado) {
-      texto += `\n<button disabled class="mt-2 block text-[11px] font-bold text-slate-400 bg-slate-100 rounded-lg px-3 py-1.5 cursor-not-allowed">Cupo lleno</button>`;
+    if (recurrente && !fechaSesion) {
+      // Evento recurrente visto sin una sesión puntual (ej. desde el menú lateral o
+      // una búsqueda por nombre): se ofrece el selector de días AQUÍ MISMO, en vez
+      // de esperar a que termine el flujo de depto/nombre para preguntarlo. El
+      // residente elige de una vez Lunes / Martes / Miércoles / Todos, igual que ya
+      // se hace para elegir qué sesiones cancelar.
+      const chkGrupo = `tarjetaDias${evento.eventoid}${Date.now()}`;
+      texto += `\n👉 *¿A qué día(s) quieres registrarte?*\n`;
+      evento.diasemana.forEach(dia => {
+        texto += `<label class="mr-1 mb-1.5 inline-flex items-center gap-1.5 text-[11px] font-bold bg-slate-100 hover:bg-slate-200 rounded-lg px-2.5 py-1.5 cursor-pointer select-none"><input type="checkbox" class="${chkGrupo}" value="${dia}"> ${dia}</label>`;
+      });
+      texto += `<br><label class="mr-1 mb-1.5 inline-flex items-center gap-1.5 text-[11px] font-bold bg-brand-50 text-brand-700 hover:bg-brand-100 rounded-lg px-2.5 py-1.5 cursor-pointer select-none"><input type="checkbox" class="${chkGrupo}Todos"> Todos los días</label>`;
+      texto += `<br><button onclick="window.iniciarRegistroDesdeTarjeta('${chkGrupo}','${evento.eventoid}','${evento.categoria}','${escapeHtml(evento.nombre).replace(/'/g, "\\'")}')" class="mt-1 inline-block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">✅ Registrarme en los días marcados</button>`;
     } else {
-      const fechaArg = fechaSesion ? `, '${fechaSesion}'` : "";
-      texto += `\n<button onclick="if(!this.disabled){this.disabled=true;this.textContent='Un momento…';window.iniciarRegistro('${evento.eventoid}','${evento.categoria}', '${escapeHtml(evento.nombre).replace(/'/g, "\\'")}'${fechaArg});}" class="mt-2 block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition disabled:opacity-50">✅ Registrarme</button>`;
+      const infoBoton = cupoInfo(evento, fechaSesion || evento.fecha);
+      const bloqueado = infoBoton.lleno;
+      if (bloqueado) {
+        texto += `\n<button disabled class="mt-2 block text-[11px] font-bold text-slate-400 bg-slate-100 rounded-lg px-3 py-1.5 cursor-not-allowed">Cupo lleno</button>`;
+      } else {
+        const fechaArg = fechaSesion ? `, '${fechaSesion}'` : "";
+        texto += `\n<button onclick="if(!this.disabled){this.disabled=true;this.textContent='Un momento…';window.iniciarRegistro('${evento.eventoid}','${evento.categoria}', '${escapeHtml(evento.nombre).replace(/'/g, "\\'")}'${fechaArg});}" class="mt-2 block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition disabled:opacity-50">✅ Registrarme</button>`;
+      }
     }
   }
   return texto;
 }
+
+// Lee el selector de días embebido en la tarjeta de un evento recurrente y arranca
+// el flujo de registro ya con los días elegidos (o todos) para no volver a
+// preguntarlos después de pedir depto/nombre.
+window.iniciarRegistroDesdeTarjeta = function(chkGrupo, eventoId, categoria, nombreEvento) {
+  const evento = buscarEventoPorId(eventoId, categoria);
+  const todosChk = document.querySelector(`.${chkGrupo}Todos`);
+  const dias = (todosChk && todosChk.checked)
+    ? (evento ? evento.diasemana.slice() : [])
+    : Array.from(document.querySelectorAll(`.${chkGrupo}:checked`)).map(c => c.value);
+
+  if (!dias.length) {
+    addMessage("Marca al menos un día (o *Todos los días*) antes de registrarte.", "bot");
+    return;
+  }
+  const etiquetaDias = (evento && dias.length === evento.diasemana.length) ? "Todos los días" : dias.join(" y ");
+  addMessage(`Registrarme en *${nombreEvento}* — ${etiquetaDias}`, "user");
+  window.iniciarRegistro(eventoId, categoria, nombreEvento, null, dias);
+};
 
 function mostrarTarjetaEventoEnChat(evento) {
   addMessage(tarjetaEventoTexto(evento), "bot");
@@ -632,7 +666,10 @@ function tieneIntencionOperativa(texto) {
 }
 
 // ---------- Flujo de registro conversacional ----------
-window.iniciarRegistro = function(eventoId, categoria, nombreEvento, fechaSesion) {
+// diasPreseleccionados (opcional): días ya elegidos desde el selector embebido en
+// la tarjeta del evento (iniciarRegistroDesdeTarjeta). Si vienen, el flujo de
+// depto/nombre no vuelve a preguntar los días — pasa directo a calcular fechas.
+window.iniciarRegistro = function(eventoId, categoria, nombreEvento, fechaSesion, diasPreseleccionados) {
   const evento = buscarEventoPorId(eventoId, categoria);
   const recurrente = evento ? esRecurrente(evento) : false;
 
@@ -651,8 +688,9 @@ window.iniciarRegistro = function(eventoId, categoria, nombreEvento, fechaSesion
   if (deptoRecordado && nombreRecordado) {
     const nombreEventoEsc = escapeHtml(nombreEvento).replace(/'/g, "\\'");
     const fechaArg = fechaSesion || "";
+    const diasCsv = (diasPreseleccionados && diasPreseleccionados.length) ? diasPreseleccionados.join(",") : "";
     addMessage(`Vamos a registrarte en *${nombreEvento}*.\n\n¿Uso los mismos datos de tu último registro? Depto *${deptoRecordado}*, nombre *${nombreRecordado}*.`, "bot");
-    const botones = `<button onclick="window.usarDatosRecordados('${eventoId}','${categoria}','${nombreEventoEsc}','${fechaArg}')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">✅ Sí, usar estos datos</button><button onclick="window.cambiarDatosRegistro('${eventoId}','${categoria}','${nombreEventoEsc}','${fechaArg}')" class="inline-block text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg px-3 py-1.5 transition">✏️ Usar otros datos</button>`;
+    const botones = `<button onclick="window.usarDatosRecordados('${eventoId}','${categoria}','${nombreEventoEsc}','${fechaArg}','${diasCsv}')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">✅ Sí, usar estos datos</button><button onclick="window.cambiarDatosRegistro('${eventoId}','${categoria}','${nombreEventoEsc}','${fechaArg}','${diasCsv}')" class="inline-block text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg px-3 py-1.5 transition">✏️ Usar otros datos</button>`;
     addMessage(botones, "bot");
     return;
   }
@@ -661,6 +699,7 @@ window.iniciarRegistro = function(eventoId, categoria, nombreEvento, fechaSesion
     eventoId, categoria, nombreEvento,
     fechaSesion: fechaSesion || null,
     esRecurrente: recurrente,
+    diasPreseleccionados: diasPreseleccionados || null,
     paso: deptoRecordado ? "nombre" : "depto",
     depto: deptoRecordado || undefined
   };
@@ -673,14 +712,19 @@ window.iniciarRegistro = function(eventoId, categoria, nombreEvento, fechaSesion
   if (chatInput) chatInput.focus();
 };
 
-window.usarDatosRecordados = async function(eventoId, categoria, nombreEvento, fechaSesion) {
+window.usarDatosRecordados = async function(eventoId, categoria, nombreEvento, fechaSesion, diasCsv) {
   const depto = deptoRecordado;
   const nombre = nombreRecordado;
   const evento = buscarEventoPorId(eventoId, categoria);
   const recurrente = evento ? esRecurrente(evento) : false;
+  const dias = diasCsv ? diasCsv.split(",").filter(d => d) : null;
 
   if (recurrente && !fechaSesion) {
-    mostrarBotonesDias(eventoId, categoria, depto, nombre, nombreEvento);
+    if (dias && dias.length) {
+      await procesarDiasElegidos(eventoId, categoria, depto, nombre, nombreEvento, dias);
+    } else {
+      mostrarBotonesDias(eventoId, categoria, depto, nombre, nombreEvento);
+    }
     return;
   }
 
@@ -688,12 +732,13 @@ window.usarDatosRecordados = async function(eventoId, categoria, nombreEvento, f
   await confirmarRegistroBackend(eventoId, categoria, depto, nombre, { fechaSesion: fechaSesion || null });
 };
 
-window.cambiarDatosRegistro = function(eventoId, categoria, nombreEvento, fechaSesion) {
+window.cambiarDatosRegistro = function(eventoId, categoria, nombreEvento, fechaSesion, diasCsv) {
   const evento = buscarEventoPorId(eventoId, categoria);
   registroEnCurso = {
     eventoId, categoria, nombreEvento,
     fechaSesion: fechaSesion || null,
     esRecurrente: evento ? esRecurrente(evento) : false,
+    diasPreseleccionados: diasCsv ? diasCsv.split(",").filter(d => d) : null,
     paso: "depto"
   };
   addMessage(`Ok, indica el nuevo número de departamento (ej. 3003):`, "bot");
@@ -734,12 +779,18 @@ async function continuarFlujoRegistro(texto) {
     registroEnCurso.nombreAsistente = txtLimpio;
     nombreRecordado = txtLimpio;
 
-    // Evento recurrente sin sesión puntual ya elegida: mostramos botones de días
-    // (en vez de pedir que lo escriba, para evitar errores de tipeo/ambigüedad).
+    // Evento recurrente sin sesión puntual ya elegida: si los días ya se marcaron
+    // en el selector de la tarjeta (diasPreseleccionados), se procesan directo —
+    // si no, se muestran los botones de días aquí (fallback, ej. atajo "usar mismos
+    // datos" sin selector previo).
     if (registroEnCurso.esRecurrente && !registroEnCurso.fechaSesion) {
-      const { eventoId, categoria, nombreEvento, depto, nombreAsistente } = registroEnCurso;
+      const { eventoId, categoria, nombreEvento, depto, nombreAsistente, diasPreseleccionados } = registroEnCurso;
       registroEnCurso = null;
-      mostrarBotonesDias(eventoId, categoria, depto, nombreAsistente, nombreEvento);
+      if (diasPreseleccionados && diasPreseleccionados.length) {
+        await procesarDiasElegidos(eventoId, categoria, depto, nombreAsistente, nombreEvento, diasPreseleccionados);
+      } else {
+        mostrarBotonesDias(eventoId, categoria, depto, nombreAsistente, nombreEvento);
+      }
       return;
     }
 
@@ -776,8 +827,8 @@ function mostrarBotonesDias(eventoId, categoria, depto, nombreAsistente, nombreE
   addMessage(msg, "bot");
 }
 
-// Lee los checkboxes marcados del grupo y junta las fechas candidatas de todos los
-// días elegidos (unión, sin duplicados) antes de pedir confirmación o registrar.
+// Lee los checkboxes marcados del grupo y delega en procesarDiasElegidos (misma
+// lógica que usa el selector embebido en la tarjeta del evento).
 window.confirmarDiasSeleccionados = async function(grupoId, eventoId, categoria, depto, nombreAsistente, nombreEvento) {
   const marcados = Array.from(document.querySelectorAll(`.${grupoId}:checked`)).map(c => c.value);
   if (!marcados.length) {
@@ -785,12 +836,19 @@ window.confirmarDiasSeleccionados = async function(grupoId, eventoId, categoria,
     return;
   }
   addMessage(marcados.join(" y "), "user");
+  await procesarDiasElegidos(eventoId, categoria, depto, nombreAsistente, nombreEvento, marcados);
+};
 
+// Junta las fechas candidatas de todos los días elegidos (unión, sin duplicados) y
+// registra directo si hay una sola sesión posible, o deja elegir cuál(es) si hay
+// varias. La usan tanto el selector de la tarjeta (iniciarRegistroDesdeTarjeta) como
+// los botones de días del flujo de chat (confirmarDiasSeleccionados).
+async function procesarDiasElegidos(eventoId, categoria, depto, nombreAsistente, nombreEvento, dias) {
   const evento = buscarEventoPorId(eventoId, categoria);
   if (!evento) { addMessage("⚠️ No encontré ese evento.", "bot"); return; }
 
   const candidatasSet = new Set();
-  marcados.forEach(dia => calcularFechasCandidatas(evento, dia).forEach(f => candidatasSet.add(f)));
+  dias.forEach(dia => calcularFechasCandidatas(evento, dia).forEach(f => candidatasSet.add(f)));
   const candidatas = Array.from(candidatasSet).sort();
 
   if (!candidatas.length) {
@@ -803,7 +861,7 @@ window.confirmarDiasSeleccionados = async function(grupoId, eventoId, categoria,
     return;
   }
   mostrarSeleccionSesiones(eventoId, categoria, depto, nombreAsistente, nombreEvento, candidatas);
-};
+}
 
 // Fechas candidatas de ESTE MES para un día específico (o todos los días de la serie)
 function calcularFechasCandidatas(evento, diaTexto) {
@@ -1030,8 +1088,11 @@ async function ejecutarConsultaPropia(tipo, nombreFiltro, depto) {
       const nf = normalizarTexto(nombreFiltro);
       registros = registros.filter(r => normalizarTexto(r.nombreEvento).includes(nf));
     }
-    if (tipo === "consultar") mostrarResultadoConsultaPropia(depto, nombreFiltro, registros);
-    else mostrarOpcionesCancelacionPropia(depto, nombreFiltro, registros);
+    // Tanto "mis registros" como "cancelar mi registro" convergen en la misma vista:
+    // se listan agrupados por evento y desde ahí mismo se puede cancelar. Antes eran
+    // dos vistas separadas (una de solo lectura, otra con un botón por sesión) —
+    // unificarlas evita mantener dos formatos de fecha/hora en paralelo.
+    mostrarResultadoConsultaPropia(depto, nombreFiltro, registros);
   } catch (e) {
     console.error("Error consultando mis_registros:", e);
     addMessage("⚠️ Error de conexión al consultar tus registros.", "bot");
@@ -1052,23 +1113,29 @@ function botonesSeguimientoRegistro() {
   return botonesSeguimientoConsulta() + `<button onclick="window.handleQuickAction('Mis registros')" class="mb-1.5 inline-block text-[11px] font-bold text-white bg-violet-600 hover:bg-violet-700 rounded-lg px-3 py-1.5 transition">📋 Ver mis registros</button>`;
 }
 
-// Tip de texto que se agrega al final de las respuestas informativas (hoy, semana,
-// categoría, ficha de un evento) para que cualquier usuario nuevo sepa qué más
-// puede preguntar y la conversación no se sienta como un callejón sin salida.
+// Tip de siguiente paso: se agrega al final de las respuestas informativas (hoy,
+// semana, categoría, ficha de un evento) para que un usuario nuevo siempre tenga a
+// mano las 4 acciones principales, sin tener que adivinar qué escribir.
 function tipSiguientePaso() {
-  return `\n\n💬 _¿Qué más quieres hacer? Escribe "eventos de hoy", "programación de la semana", el nombre de un evento (ej. "días y horario de Zumba"), "mis registros" o "cancelar mi registro"._`;
+  return `\n\n💬 ¿Qué más quieres hacer?\n` + mensajeBotonesBienvenida();
 }
 
 // Botones de bienvenida: las 4 acciones principales que un usuario nuevo necesita
 // para entender el agente desde el primer mensaje — qué hay, registrarse, ver sus
-// registros y cancelar. Se usan tanto en el mensaje de bienvenida como en la
-// respuesta de "ayuda".
+// registros y cancelar. Se usan en el mensaje de bienvenida, en "ayuda" y como pie
+// de casi todas las respuestas informativas (tipSiguientePaso).
 function mensajeBotonesBienvenida() {
   return `<button onclick="window.handleQuickAction('Ver eventos de hoy')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">🎈 Eventos de hoy</button>`
     + `<button onclick="window.handleQuickAction('Ver programación de eventos de la semana')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg px-3 py-1.5 transition">📅 Programación de la semana</button>`
     + `<button onclick="window.handleQuickAction('Mis registros')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-violet-600 hover:bg-violet-700 rounded-lg px-3 py-1.5 transition">📋 Mis registros</button>`
     + `<button onclick="window.handleQuickAction('Cancelar mi registro')" class="mb-1.5 inline-block text-[11px] font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg px-3 py-1.5 transition">🗑️ Cancelar un registro</button>`;
 }
+
+// Registros del último "mis registros" agrupados por evento, guardados en memoria
+// para que el botón "Cancelar alguno de estos registros" no tenga que codificar un
+// arreglo completo dentro del atributo onclick (poco práctico y frágil de escapar).
+// Se pierde con un refresh, igual que deptoRecordado/nombreRecordado.
+let gruposCancelablesTemp = {};
 
 function mostrarResultadoConsultaPropia(depto, nombreFiltro, registros) {
   if (!registros.length) {
@@ -1080,45 +1147,84 @@ function mostrarResultadoConsultaPropia(depto, nombreFiltro, registros) {
     return;
   }
 
-  let msg = `✅ El departamento ${depto} tiene ${registros.length} registro(s) confirmado(s):\n\n`;
+  // Agrupamos por evento (no una fila por sesión) — así "Ping Pong" con 8 sesiones
+  // aparece UNA vez con sus 8 fechas adentro, no repetido 8 veces en la lista.
+  const grupos = {};
+  const orden = [];
   registros.forEach(r => {
-    const fechaTxt = r.fechaSesion ? formatearFecha(parseFechaLocal(r.fechaSesion)) : "Sin fecha";
-    const horaTxt = r.horaInicio ? ` · ${r.horaInicio}${r.horaFin ? "–" + r.horaFin : ""}` : "";
-    const nombreEsc = escapeHtml(r.nombreEvento).replace(/'/g, "\\'");
-    msg += `📌 *${r.nombreEvento}*\n🗓️ ${fechaTxt}${horaTxt}\n`;
-    msg += `<button onclick="window.cancelarMiRegistroDesdeChat('${depto}','${r.registroId}','${nombreEsc}','${r.fechaSesion || ""}')" class="mt-0.5 mb-2 inline-block text-[11px] font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg px-2 py-1 transition">🗑️ Cancelar este registro</button>\n`;
+    const key = `${r.eventoId}|${r.categoria}`;
+    if (!grupos[key]) { grupos[key] = { eventoId: r.eventoId, categoria: r.categoria, nombreEvento: r.nombreEvento, items: [] }; orden.push(key); }
+    grupos[key].items.push({ registroId: r.registroId, fechaSesion: r.fechaSesion });
   });
 
-  msg += `\n¿Quieres registrarte a algún otro evento?\n`;
+  let msg = `✅ El departamento ${depto} tiene ${registros.length} registro(s) confirmado(s):\n\n`;
+  orden.forEach(key => {
+    const g = grupos[key];
+    const evento = buscarEventoPorId(g.eventoId, g.categoria);
+    const cfg = evento ? CATEGORIAS[evento.categoria] : null;
+    const nombreEsc = escapeHtml(g.nombreEvento).replace(/'/g, "\\'");
+
+    msg += `${cfg ? cfg.emoji : "📌"} *${g.nombreEvento}*\n`;
+    if (evento) msg += `🕐 ${horarioTexto(evento)} · 📍 ${evento.ubicacion || "N/A"}\n`;
+
+    const itemsOrdenados = g.items.slice().sort((a, b) => String(a.fechaSesion).localeCompare(String(b.fechaSesion)));
+    itemsOrdenados.forEach(item => {
+      const fechaDate = item.fechaSesion ? parseFechaLocal(item.fechaSesion) : null;
+      const diaTxt = fechaDate && !isNaN(fechaDate) ? DIAS_SEMANA_LARGOS[fechaDate.getDay()].slice(0, 3) : "";
+      const fechaTxt = fechaDate && !isNaN(fechaDate) ? formatearFecha(fechaDate) : "Sin fecha";
+      msg += `   🟢 ${diaTxt} ${fechaTxt}\n`;
+    });
+
+    const grupoId = `cancelGrp${Date.now()}${orden.indexOf(key)}`;
+    gruposCancelablesTemp[grupoId] = { depto, nombreEvento: g.nombreEvento, items: itemsOrdenados };
+    msg += `<button onclick="window.abrirCancelacionEvento('${grupoId}')" class="mt-0.5 mb-2 inline-block text-[11px] font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg px-3 py-1.5 transition">🗑️ Cancelar alguno de estos registros</button>\n\n`;
+  });
+
+  msg += `¿Quieres registrarte a algún otro evento?\n`;
   msg += botonesSeguimientoConsulta();
   addMessage(msg.trim(), "bot");
 }
 
-function mostrarOpcionesCancelacionPropia(depto, nombreFiltro, registros) {
-  if (!registros.length) {
-    const msg = nombreFiltro
-      ? `No encontré ningún registro confirmado del depto ${depto} en *${nombreFiltro}* para cancelar.`
-      : `No encontré registros futuros confirmados del depto ${depto} para cancelar.`;
-    addMessage(msg, "bot");
+// Abre el selector de sesiones a cancelar: un checkbox por fecha registrada + una
+// opción "Seleccionar todas", igual que el patrón ya usado para elegir días al
+// registrarse (confirmarDiasSeleccionados). Evita cancelar de un solo clic por
+// accidente y deja elegir exactamente cuáles sesiones dar de baja.
+window.abrirCancelacionEvento = function(grupoId) {
+  const grupo = gruposCancelablesTemp[grupoId];
+  if (!grupo || !grupo.items.length) {
+    addMessage("⚠️ No encontré esos registros (puede que la lista haya cambiado). Escribe *mis registros* de nuevo.", "bot");
     return;
   }
+  addMessage(`Cancelar ${grupo.nombreEvento}`, "user");
 
-  let msg = `Estos son los registros confirmados del depto ${depto}${nombreFiltro ? ` en *${nombreFiltro}*` : ""}:\n\n`;
-  registros.forEach(r => {
-    const fechaTxt = formatearFecha(parseFechaLocal(r.fechaSesion));
-    const nombreEscapado = escapeHtml(r.nombreEvento).replace(/'/g, "\\'");
-    msg += `📌 *${r.nombreEvento}* — ${fechaTxt}\n`;
-    msg += `<button onclick="window.cancelarMiRegistroDesdeChat('${depto}','${r.registroId}','${nombreEscapado}','${r.fechaSesion}')" class="mt-0.5 mb-1.5 inline-block text-[11px] font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg px-2 py-1 transition">🗑️ Cancelar esta sesión</button>\n`;
+  const chkGrupo = `cancelChk${Date.now()}`;
+  let msg = `¿Qué sesión(es) de *${grupo.nombreEvento}* quieres cancelar?\n\n`;
+  grupo.items.forEach(item => {
+    const fechaDate = item.fechaSesion ? parseFechaLocal(item.fechaSesion) : null;
+    const diaTxt = fechaDate && !isNaN(fechaDate) ? DIAS_SEMANA_LARGOS[fechaDate.getDay()].slice(0, 3) + " " : "";
+    const fechaTxt = fechaDate && !isNaN(fechaDate) ? formatearFecha(fechaDate) : "Sin fecha";
+    msg += `<label class="mr-1 mb-1.5 inline-flex items-center gap-1.5 text-[11px] font-bold bg-slate-100 hover:bg-slate-200 rounded-lg px-2.5 py-1.5 cursor-pointer select-none"><input type="checkbox" class="${chkGrupo}" value="${item.registroId}"> ${diaTxt}${fechaTxt}</label>`;
   });
+  msg += `<br><label class="mr-1 mb-1.5 inline-flex items-center gap-1.5 text-[11px] font-bold bg-red-50 text-red-700 hover:bg-red-100 rounded-lg px-2.5 py-1.5 cursor-pointer select-none"><input type="checkbox" class="${chkGrupo}Todas"> Seleccionar todas</label>`;
+  msg += `<br><button onclick="window.confirmarCancelacionMultiple('${chkGrupo}','${grupoId}')" class="mt-1 inline-block text-[11px] font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg px-3 py-1.5 transition">🗑️ Cancelar seleccionadas</button>`;
+  addMessage(msg, "bot");
+};
 
-  if (registros.length > 1) {
-    const idsList = registros.map(r => r.registroId).join(",");
-    const etiquetaTodas = nombreFiltro ? escapeHtml(nombreFiltro) : "todos los registros listados";
-    msg += `\n<button onclick="window.cancelarMiRegistroDesdeChat('${depto}','${idsList}','${etiquetaTodas}', null)" class="mt-1 block text-[11px] font-bold text-white bg-red-800 hover:bg-red-900 rounded-lg px-3 py-1.5 transition">🗑️ Cancelar TODAS estas (${registros.length})</button>`;
+window.confirmarCancelacionMultiple = function(chkGrupo, grupoId) {
+  const grupo = gruposCancelablesTemp[grupoId];
+  if (!grupo) { addMessage("⚠️ Esa selección ya expiró, escribe *mis registros* de nuevo.", "bot"); return; }
+
+  const todasChk = document.querySelector(`.${chkGrupo}Todas`);
+  const ids = (todasChk && todasChk.checked)
+    ? grupo.items.map(i => i.registroId)
+    : Array.from(document.querySelectorAll(`.${chkGrupo}:checked`)).map(c => c.value);
+
+  if (!ids.length) {
+    addMessage("Marca al menos una sesión (o *Seleccionar todas*) antes de confirmar.", "bot");
+    return;
   }
-
-  addMessage(msg.trim(), "bot");
-}
+  window.cancelarMiRegistroDesdeChat(grupo.depto, ids.join(","), grupo.nombreEvento, null);
+};
 
 window.cancelarMiRegistroDesdeChat = async function(depto, registroIdsCsv, etiqueta, fecha) {
   const detalleFecha = fecha ? ` (${formatearFecha(parseFechaLocal(fecha))})` : "";
@@ -1162,7 +1268,7 @@ function responderMensajeLocal(textoOriginal) {
   if (categoriaDetectada) return respuestaPorCategoria(categoriaDetectada);
 
   if (normalizado.includes("ayuda") || normalizado === "hola") {
-    return `👋 ¡Hola! Esto es lo que puedo hacer por ti:\n\n🎈 *"Eventos de hoy"* — qué hay programado hoy\n📅 *"Programación de la semana"* — agenda completa de lunes a domingo\n🔍 El *nombre de un evento* (ej. "días y horario de Zumba") — para ver cupo, fecha y horario\n✅ *"Quiero registrarme en [evento]"* o usa el botón *Registrarme* de cualquier tarjeta\n📋 *"Mis registros"* — ver a qué estás inscrito\n🗑️ *"Cancelar mi registro"* — dar de baja una inscripción\n\n¿Con cuál empezamos?` + "\n\n" + mensajeBotonesBienvenida();
+    return `👋 ¡Hola! Esto es lo que puedo hacer por ti:\n\n🎈 *"Eventos de hoy"* — qué hay programado hoy\n📅 *"Programación de la semana"* — agenda completa de lunes a domingo\n🔍 El *nombre de un evento* (ej. "días y horario de Zumba") — para ver cupo, fecha y horario\n✅ *"Quiero registrarme en [evento]"* o usa el botón *Registrarme* de cualquier tarjeta\n📋 *"Mis registros"* — ver a qué estás inscrito\n🗑️ *"Cancelar mi registro"* — dar de baja una inscripción\n\n📂 También puedes explorar el menú de la izquierda por categoría para ver el detalle completo de cualquier evento.\n\n¿Con cuál empezamos?` + "\n\n" + mensajeBotonesBienvenida();
   }
 
   return null; // sin match local (o mención del evento sin intención operativa) -> se consulta a la IA
