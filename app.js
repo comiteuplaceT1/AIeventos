@@ -26,11 +26,10 @@ const DIAS_SEMANA_LARGOS = ["Domingo","Lunes","Martes","Miércoles","Jueves","Vi
 const UBICACIONES = [
   "Alberca / Jacuzzi P6",
   "Chapoteadero P6",
+  "Salón Yoga P6",
   "Jardín P6",
-  "Cancha Multiusos P6",
   "Coffee Place PB",
   "Lobby PB",
-  "Salón P31",
   "Terraza P31",
   "Skylounge P31"
 ];
