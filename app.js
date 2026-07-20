@@ -14,7 +14,7 @@ const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7
 
 // ⚠️ COPIA AQUÍ EL LINK DE IMPLEMENTACIÓN DE TU GOOGLE APPS SCRIPT (APLICACIÓN WEB /EXEC)
 // Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con Gemini.
-const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbzWwCSRzDW32qwtXudelLarwAJ40jWK2cypAUXUqoQ5bgxQ1DSS2n7XpHT4RCtntbmg/exec";
+const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbz46mHeaZGp8Fcr_rCTcpHb_hcW1_9_nAFIKKus9KG89oUFVppZbs4a7Y9gLpu-m6lD/exec";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -860,7 +860,7 @@ async function procesarDiasElegidos(eventoId, categoria, depto, nombreAsistente,
     await confirmarRegistroBackend(eventoId, categoria, depto, nombreAsistente, { fechaSesion: candidatas[0] });
     return;
   }
-  mostrarSeleccionSesiones(eventoId, categoria, depto, nombreAsistente, nombreEvento, candidatas);
+  mostrarConfirmacionMultiSesion(eventoId, categoria, depto, nombreAsistente, nombreEvento, candidatas);
 }
 
 // Fechas candidatas de ESTE MES para un día específico (o todos los días de la serie)
@@ -889,6 +889,34 @@ window.elegirDiaRegistro = async function(eventoId, categoria, depto, nombreAsis
     await confirmarRegistroBackend(eventoId, categoria, depto, nombreAsistente, { fechaSesion: candidatas[0] });
     return;
   }
+  mostrarConfirmacionMultiSesion(eventoId, categoria, depto, nombreAsistente, nombreEvento, candidatas);
+};
+
+// El residente YA eligió los días (en la tarjeta o en los checkboxes del chat) —
+// volver a pedirle que elija sesión por sesión (como antes) es redundante. En vez
+// de eso se muestra un resumen de las fechas ya encontradas y se pide una sola
+// confirmación; "Elegir días específicos" queda como escape hacia la selección
+// granular (mostrarSeleccionSesiones) por si el residente cambia de opinión.
+function mostrarConfirmacionMultiSesion(eventoId, categoria, depto, nombreAsistente, nombreEvento, candidatas) {
+  const nombreAsistenteEsc = escapeHtml(nombreAsistente).replace(/'/g, "\\'");
+  const nombreEventoEsc = escapeHtml(nombreEvento).replace(/'/g, "\\'");
+  const todasCsv = candidatas.join(",");
+
+  let msg = `Vas a registrarte en *${nombreEvento}* para estas ${candidatas.length} sesiones de este mes:\n\n`;
+  candidatas.forEach(fechaIso => {
+    const fechaDate = parseFechaLocal(fechaIso);
+    const nombreDia = DIAS_SEMANA_LARGOS[fechaDate.getDay()].slice(0, 3);
+    msg += `   🟢 ${nombreDia} ${formatearFecha(fechaDate)}\n`;
+  });
+  msg += `\n<button onclick="window.confirmarRegistroConFechas('${eventoId}','${categoria}','${depto}','${nombreAsistenteEsc}','${todasCsv}','${nombreEventoEsc}')" class="mt-1 mr-1.5 inline-block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">✅ Sí, registrarme a todas</button>`;
+  msg += `<button onclick="window.elegirSesionesIndividualmente('${eventoId}','${categoria}','${depto}','${nombreAsistenteEsc}','${nombreEventoEsc}','${todasCsv}')" class="inline-block text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg px-3 py-1.5 transition">✏️ Elegir días específicos</button>`;
+  addMessage(msg.trim(), "bot");
+}
+
+// Escape hacia la selección granular (una sesión a la vez o todas) cuando el
+// residente no quiere las 5 fechas completas de mostrarConfirmacionMultiSesion.
+window.elegirSesionesIndividualmente = function(eventoId, categoria, depto, nombreAsistente, nombreEvento, candidatasCsv) {
+  const candidatas = candidatasCsv.split(",").filter(f => f);
   mostrarSeleccionSesiones(eventoId, categoria, depto, nombreAsistente, nombreEvento, candidatas);
 };
 
@@ -1168,11 +1196,14 @@ function mostrarResultadoConsultaPropia(depto, nombreFiltro, registros) {
     if (evento) msg += `🕐 ${horarioTexto(evento)} · 📍 ${evento.ubicacion || "N/A"}\n`;
 
     const itemsOrdenados = g.items.slice().sort((a, b) => String(a.fechaSesion).localeCompare(String(b.fechaSesion)));
-    itemsOrdenados.forEach(item => {
+    itemsOrdenados.forEach((item, idx) => {
       const fechaDate = item.fechaSesion ? parseFechaLocal(item.fechaSesion) : null;
-      const diaTxt = fechaDate && !isNaN(fechaDate) ? DIAS_SEMANA_LARGOS[fechaDate.getDay()].slice(0, 3) : "";
-      const fechaTxt = fechaDate && !isNaN(fechaDate) ? formatearFecha(fechaDate) : "Sin fecha";
-      msg += `   🟢 ${diaTxt} ${fechaTxt}\n`;
+      const valido = fechaDate && !isNaN(fechaDate);
+      // "Sin fecha" solo debería verse en registros muy viejos, creados antes de que
+      // el backend guardara FechaSesion (ver fix en Code.gs). Se numeran para poder
+      // distinguirlos entre sí si hay varios del mismo evento.
+      const linea = valido ? `${DIAS_SEMANA_LARGOS[fechaDate.getDay()].slice(0, 3)} ${formatearFecha(fechaDate)}` : `Sin fecha registrada (#${idx + 1})`;
+      msg += `   🟢 ${linea}\n`;
     });
 
     const grupoId = `cancelGrp${Date.now()}${orden.indexOf(key)}`;
@@ -1199,11 +1230,11 @@ window.abrirCancelacionEvento = function(grupoId) {
 
   const chkGrupo = `cancelChk${Date.now()}`;
   let msg = `¿Qué sesión(es) de *${grupo.nombreEvento}* quieres cancelar?\n\n`;
-  grupo.items.forEach(item => {
+  grupo.items.forEach((item, idx) => {
     const fechaDate = item.fechaSesion ? parseFechaLocal(item.fechaSesion) : null;
-    const diaTxt = fechaDate && !isNaN(fechaDate) ? DIAS_SEMANA_LARGOS[fechaDate.getDay()].slice(0, 3) + " " : "";
-    const fechaTxt = fechaDate && !isNaN(fechaDate) ? formatearFecha(fechaDate) : "Sin fecha";
-    msg += `<label class="mr-1 mb-1.5 inline-flex items-center gap-1.5 text-[11px] font-bold bg-slate-100 hover:bg-slate-200 rounded-lg px-2.5 py-1.5 cursor-pointer select-none"><input type="checkbox" class="${chkGrupo}" value="${item.registroId}"> ${diaTxt}${fechaTxt}</label>`;
+    const valido = fechaDate && !isNaN(fechaDate);
+    const etiqueta = valido ? `${DIAS_SEMANA_LARGOS[fechaDate.getDay()].slice(0, 3)} ${formatearFecha(fechaDate)}` : `Sin fecha registrada (#${idx + 1})`;
+    msg += `<label class="mr-1 mb-1.5 inline-flex items-center gap-1.5 text-[11px] font-bold bg-slate-100 hover:bg-slate-200 rounded-lg px-2.5 py-1.5 cursor-pointer select-none"><input type="checkbox" class="${chkGrupo}" value="${item.registroId}"> ${etiqueta}</label>`;
   });
   msg += `<br><label class="mr-1 mb-1.5 inline-flex items-center gap-1.5 text-[11px] font-bold bg-red-50 text-red-700 hover:bg-red-100 rounded-lg px-2.5 py-1.5 cursor-pointer select-none"><input type="checkbox" class="${chkGrupo}Todas"> Seleccionar todas</label>`;
   msg += `<br><button onclick="window.confirmarCancelacionMultiple('${chkGrupo}','${grupoId}')" class="mt-1 inline-block text-[11px] font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg px-3 py-1.5 transition">🗑️ Cancelar seleccionadas</button>`;
