@@ -1,5 +1,5 @@
 /**
- * Agente IA de Eventos Comunitarios — Lógica completa del chat, registro y calendario.
+ * Agente de Eventos Comunitarios — Lógica completa del chat, registro y calendario.
  * Lee 4 categorías de eventos + registros en tiempo real desde Google Sheets (CSV, costo cero tokens).
  * El registro de asistentes y la validación de morosos se resuelven contra Google Apps Script.
  */
@@ -288,7 +288,7 @@ async function inicializar() {
     refrescarCuposLive();
 
     if (messagesEl && messagesEl.children.length === 0) {
-      addMessage(`👋 *¡Hola! Bienvenido a Eventos Comunitarios de Uplace.*\n\nSoy tu *Agente IA de Eventos*. Aquí puedes:\n\n🎈 Ver los eventos de *hoy* o de la *semana*\n🔍 Preguntar por un evento específico (ej. "¿qué días y horario tiene Zumba?")\n✅ *Registrarte* directamente desde el chat\n📋 Consultar *tus registros* actuales\n🗑️ *Cancelar* un registro\n\n📂 También puedes explorar el menú de la izquierda por categoría para ver el detalle completo de cualquier evento.\n\nElige una opción o escríbeme lo que necesites:`, "bot");
+      addMessage(`👋 *¡Hola! Bienvenido a Eventos Comunitarios de Uplace.*\n\nSoy tu *Agente de Eventos*. Aquí puedes:\n\n🎈 Ver los eventos de *hoy* o de la *semana*\n🔍 Preguntar por un evento específico (ej. "¿qué días y horario tiene Zumba?")\n✅ *Registrarte* directamente desde el chat\n📋 Consultar *tus registros* actuales\n🗑️ *Cancelar* un registro\n\n📂 También puedes explorar el menú de la izquierda por categoría para ver el detalle completo de cualquier evento, o preguntar directamente en el chat (ej. "¿que deportes hay?", "alguna actividad social?, o directamente "deportes", "social") \n\nElige una opción o escríbeme lo que necesites:`, "bot");
       addMessage(mensajeBotonesBienvenida(), "bot");
     }
   } catch (error) {
