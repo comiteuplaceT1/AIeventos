@@ -14,7 +14,7 @@ const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7
 
 // ⚠️ COPIA AQUÍ EL LINK DE IMPLEMENTACIÓN DE TU GOOGLE APPS SCRIPT (APLICACIÓN WEB /EXEC)
 // Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con Gemini.
-const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbz46mHeaZGp8Fcr_rCTcpHb_hcW1_9_nAFIKKus9KG89oUFVppZbs4a7Y9gLpu-m6lD/exec";
+const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbz6gIPyQ3IT44KKkZNMEA4MnFckmQCclNZJ_HoItcL7bFXaXEPF5pbXGIxaoFFFDKk/exec";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -923,21 +923,31 @@ window.elegirSesionesIndividualmente = function(eventoId, categoria, depto, nomb
 function mostrarSeleccionSesiones(eventoId, categoria, depto, nombreAsistente, nombreEvento, candidatas) {
   const nombreAsistenteEsc = escapeHtml(nombreAsistente).replace(/'/g, "\\'");
   const nombreEventoEsc = escapeHtml(nombreEvento).replace(/'/g, "\\'");
+  const chkGrupo = `sesGrp${Date.now()}`;
 
-  let msg = `Encontré estas sesiones de *${nombreEvento}* este mes. Elige a cuál(es) quieres registrarte:\n\n`;
+  let msg = `¿A cuál(es) de estas sesiones de *${nombreEvento}* quieres registrarte?\n\n`;
   candidatas.forEach(fechaIso => {
     const fechaDate = parseFechaLocal(fechaIso);
-    const nombreDia = DIAS_SEMANA_LARGOS[fechaDate.getDay()];
-    msg += `📅 ${nombreDia} ${formatearFecha(fechaDate)}\n`;
-    msg += `<button onclick="window.confirmarRegistroConFechas('${eventoId}','${categoria}','${depto}','${nombreAsistenteEsc}','${fechaIso}','${nombreEventoEsc}')" class="mt-0.5 mb-1.5 inline-block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-2 py-1 transition">✅ Solo este día</button>\n`;
+    const nombreDia = DIAS_SEMANA_LARGOS[fechaDate.getDay()].slice(0, 3);
+    msg += `<label class="mr-1 mb-1.5 inline-flex items-center gap-1.5 text-[11px] font-bold bg-slate-100 hover:bg-slate-200 rounded-lg px-2.5 py-1.5 cursor-pointer select-none"><input type="checkbox" class="${chkGrupo}" value="${fechaIso}"> ${nombreDia} ${formatearFecha(fechaDate)}</label>`;
   });
-
-  if (candidatas.length > 1) {
-    const todasCsv = candidatas.join(",");
-    msg += `\n<button onclick="window.confirmarRegistroConFechas('${eventoId}','${categoria}','${depto}','${nombreAsistenteEsc}','${todasCsv}','${nombreEventoEsc}')" class="mt-1 block text-[11px] font-bold text-white bg-brand-800 hover:bg-brand-900 rounded-lg px-3 py-1.5 transition">✅ Registrarme a todos estos días (${candidatas.length})</button>`;
-  }
+  msg += `<br><label class="mr-1 mb-1.5 inline-flex items-center gap-1.5 text-[11px] font-bold bg-brand-50 text-brand-700 hover:bg-brand-100 rounded-lg px-2.5 py-1.5 cursor-pointer select-none"><input type="checkbox" class="${chkGrupo}Todas"> Seleccionar todas</label>`;
+  msg += `<br><button onclick="window.confirmarSesionesSeleccionadas('${chkGrupo}','${eventoId}','${categoria}','${depto}','${nombreAsistenteEsc}','${nombreEventoEsc}')" class="mt-1 inline-block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">✅ Registrarme a las seleccionadas</button>`;
   addMessage(msg.trim(), "bot");
 }
+
+window.confirmarSesionesSeleccionadas = async function(chkGrupo, eventoId, categoria, depto, nombreAsistente, nombreEvento) {
+  const todasChk = document.querySelector(`.${chkGrupo}Todas`);
+  const fechas = (todasChk && todasChk.checked)
+    ? Array.from(document.querySelectorAll(`.${chkGrupo}`)).map(c => c.value)
+    : Array.from(document.querySelectorAll(`.${chkGrupo}:checked`)).map(c => c.value);
+
+  if (!fechas.length) {
+    addMessage("Marca al menos una sesión (o *Seleccionar todas*) antes de confirmar.", "bot");
+    return;
+  }
+  await window.confirmarRegistroConFechas(eventoId, categoria, depto, nombreAsistente, fechas.join(","), nombreEvento);
+};
 
 window.confirmarRegistroConFechas = async function(eventoId, categoria, depto, nombreAsistente, fechasCsv, nombreEvento) {
   addMessage(`Confirmando registro de *${nombreAsistente}* (depto ${depto}) en *${nombreEvento}*…`, "bot");
@@ -1010,13 +1020,22 @@ function mostrarResultadoMultiSesion(eventoId, data) {
     msg += `\n⚠️ No se pudieron confirmar ${fallidas.length} sesión(es):\n`;
     fallidas.forEach(d => {
       const fechaTxt = formatearFecha(parseFechaLocal(d.fecha));
-      const motivoTxt = d.motivo === "cupo" ? "cupo lleno" : "huellas agotadas para el depto";
+      let motivoTxt;
+      if (d.motivo === "cupo") {
+        motivoTxt = "cupo lleno";
+      } else if (d.motivo === "huellas") {
+        motivoTxt = d.huellasMaxDepto > 1
+          ? `el depto ya alcanzó su máximo de ${d.huellasMaxDepto} registro(s) para esa fecha`
+          : "el depto ya tiene un registro confirmado para esa fecha";
+      } else {
+        motivoTxt = "no se pudo confirmar";
+      }
       msg += `❌ ${fechaTxt} — ${motivoTxt}\n`;
     });
   }
 
   if (confirmadas.length > 0) {
-    msg += `\n📌 Este registro cubre solo las sesiones de este mes. Para seguir el próximo mes, vuelve a escribir "quiero registrarme" en *${data.nombreEvento}*.`;
+    msg += `\n📌 Este registro cubre solo las sesiones de este mes. Para seguir el próximo mes con tus sesiones, vuelve a escribir "quiero registrarme" en *${data.nombreEvento}* a partir del mes que viene.`;
   }
 
   addMessage(msg.trim(), "bot");
@@ -1494,6 +1513,11 @@ function renderAdminPanel() {
           <label class="block text-xs font-bold text-slate-500 mb-1">Cupo total (por sesión si es recurrente)</label>
           <input id="fCupo" type="number" min="1" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
         </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1">Personas del mismo depto por sesión</label>
+          <input id="fHuellasMaxDepto" type="number" min="1" placeholder="1 (dejar vacío = 1 persona por depto)" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          <p class="text-[10px] text-slate-400 mt-1">Normalmente 1. Súbelo para eventos tipo suscripción o inscripción por pareja/familia donde un mismo depto puede anotar a varias personas en la misma sesión.</p>
+        </div>
         <div class="border-t border-slate-100 pt-2.5">
           <label class="block text-xs font-bold text-slate-500 mb-1.5">¿Se repite cada semana? (ej. Zumba Lun/Mié/Sáb)</label>
           <p class="text-[10px] text-slate-400 mb-2">Cada sesión tendrá su propio cupo independiente (el de arriba), no uno compartido para toda la serie.</p>
@@ -1702,6 +1726,7 @@ async function crearEventoDesdeAdmin() {
   const sinCupo = document.getElementById("fSinCupo").checked;
   const cupoTotal = sinCupo ? "" : (document.getElementById("fCupo").value || "0");
   const tieneCosto = document.getElementById("fTieneCosto").checked;
+  const huellasMaxDepto = document.getElementById("fHuellasMaxDepto").value.trim();
   const diasSeleccionados = Array.from(document.querySelectorAll(".fDiaSemana:checked")).map(c => c.value);
   const diasSemana = diasSeleccionados.join(",");
   const fechaFin = diasSeleccionados.length ? document.getElementById("fFechaFin").value : "";
@@ -1728,7 +1753,7 @@ async function crearEventoDesdeAdmin() {
   }
 
   try {
-    const url = `${URL_AGENTE_EVENTOS}?accion=crear_evento&pin=${encodeURIComponent(adminState.pin)}&categoria=${encodeURIComponent(categoria)}&nombre=${encodeURIComponent(nombre)}&descripcion=${encodeURIComponent(descripcion)}&fecha=${encodeURIComponent(fecha)}&horaInicio=${encodeURIComponent(horaInicio)}&horaFin=${encodeURIComponent(horaFin)}&ubicacion=${encodeURIComponent(ubicacion)}&cupoTotal=${encodeURIComponent(cupoTotal)}&sinCupo=${sinCupo ? "1" : "0"}&tieneCosto=${tieneCosto ? "1" : "0"}&diasSemana=${encodeURIComponent(diasSemana)}&fechaFin=${encodeURIComponent(fechaFin)}`;
+    const url = `${URL_AGENTE_EVENTOS}?accion=crear_evento&pin=${encodeURIComponent(adminState.pin)}&categoria=${encodeURIComponent(categoria)}&nombre=${encodeURIComponent(nombre)}&descripcion=${encodeURIComponent(descripcion)}&fecha=${encodeURIComponent(fecha)}&horaInicio=${encodeURIComponent(horaInicio)}&horaFin=${encodeURIComponent(horaFin)}&ubicacion=${encodeURIComponent(ubicacion)}&cupoTotal=${encodeURIComponent(cupoTotal)}&sinCupo=${sinCupo ? "1" : "0"}&tieneCosto=${tieneCosto ? "1" : "0"}&diasSemana=${encodeURIComponent(diasSemana)}&fechaFin=${encodeURIComponent(fechaFin)}&huellasMaxDepto=${encodeURIComponent(huellasMaxDepto)}`;
     const res = await fetch(url, { cache: "no-store" });
     const data = await res.json();
     if (data.ok) {
