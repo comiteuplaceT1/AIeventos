@@ -710,7 +710,7 @@ window.iniciarRegistro = function(eventoId, categoria, nombreEvento, fechaSesion
   if (deptoRecordado) {
     addMessage(`Vamos a registrarte en *${nombreEvento}* (depto ${deptoRecordado}, el mismo de antes).\n\nIndica el nombre completo de quien asistirá, o escribe *cambiar depto* si no es el correcto.`, "bot");
   } else {
-    addMessage(`Vamos a registrarte en *${nombreEvento}*.\n\nPor favor indica tu número de departamento (ej. 3003). Escribe *cancelar* en cualquier momento para salir de este registro.`, "bot");
+    addMessage(`Vamos a registrarte en *${nombreEvento}*.\n\nPor favor indica tu número de departamento (ej. 3801 o 605). Escribe *cancelar* en cualquier momento para salir de este registro.`, "bot");
   }
   if (chatInput) chatInput.focus();
 };
@@ -744,7 +744,7 @@ window.cambiarDatosRegistro = function(eventoId, categoria, nombreEvento, fechaS
     diasPreseleccionados: diasCsv ? diasCsv.split(",").filter(d => d) : null,
     paso: "depto"
   };
-  addMessage(`Ok, indica el nuevo número de departamento (ej. 3003):`, "bot");
+  addMessage(`Ok, indica el nuevo número de departamento (ej. 3801 o 605):`, "bot");
   if (chatInput) chatInput.focus();
 };
 
@@ -759,7 +759,7 @@ async function continuarFlujoRegistro(texto) {
 
   if (registroEnCurso.paso === "depto") {
     if (!/^[0-9]{2,5}$/.test(txtLimpio)) {
-      addMessage("Ese número de departamento no parece válido. Escríbelo solo con números (ej. 3003), o escribe *cancelar*.", "bot");
+      addMessage("Ese número de departamento no parece válido. Escríbelo solo con números (ej. 3801 o 605), o escribe *cancelar*.", "bot");
       return;
     }
     registroEnCurso.depto = txtLimpio;
@@ -1091,7 +1091,7 @@ function iniciarConsultaPropia(tipo, nombreFiltro) {
     const intro = tipo === "cancelar"
       ? (nombreFiltro ? `Vamos a cancelar tu registro a *${nombreFiltro}* (depto ${deptoRecordado}, el mismo de antes).` : `Vamos a revisar tus registros del depto ${deptoRecordado} (el mismo de antes) para que elijas cuál cancelar.`)
       : (nombreFiltro ? `Voy a revisar si el depto ${deptoRecordado} (el mismo de antes) tiene reserva en *${nombreFiltro}*.` : `Voy a revisar los registros del depto ${deptoRecordado} (el mismo de antes).`);
-    addMessage(`${intro}\n\n_Si no es tu depto, escribe "cambiar depto"._`, "bot");
+    addMessage(`${intro}\n\nSi no es tu depto, escribe *cambiar depto*.`, "bot");
     ejecutarConsultaPropia(tipo, nombreFiltro, deptoRecordado);
     return;
   }
@@ -1099,7 +1099,7 @@ function iniciarConsultaPropia(tipo, nombreFiltro) {
   const intro = tipo === "cancelar"
     ? (nombreFiltro ? `Vamos a cancelar tu registro a *${nombreFiltro}*.` : `Vamos a revisar tus registros para que elijas cuál cancelar.`)
     : (nombreFiltro ? `Voy a revisar si tienes reserva en *${nombreFiltro}*.` : `Voy a revisar tus registros.`);
-  addMessage(`${intro}\n\nPor favor indica tu número de departamento (ej. 3003). Escribe *cancelar* para salir.`, "bot");
+  addMessage(`${intro}\n\nPor favor indica tu número de departamento (ej. 3801 o 605). Escribe *cancelar* para salir.`, "bot");
   if (chatInput) chatInput.focus();
 }
 
@@ -1112,7 +1112,7 @@ async function continuarConsultaPropia(texto) {
   }
   if (consultaEnCurso.paso === "depto") {
     if (!/^[0-9]{2,5}$/.test(txt)) {
-      addMessage("Ese número de departamento no parece válido. Escríbelo solo con números (ej. 3003), o escribe *cancelar*.", "bot");
+      addMessage("Ese número de departamento no parece válido. Escríbelo solo con números (ej. 3801 o 605), o escribe *cancelar*.", "bot");
       return;
     }
     consultaEnCurso.depto = txt;
@@ -1702,7 +1702,7 @@ function renderAdminPanel() {
     body.innerHTML = `
       <p class="text-sm text-slate-600 mb-2">Evento: <strong>${escapeHtml(ev.nombre)}</strong>${esRecurrente(ev) ? ` (${recurrenciaTexto(ev)})` : ""}</p>
       <label class="block text-xs font-bold text-slate-500 mb-1">Número de departamento</label>
-      <input id="fBajaDepto" type="text" placeholder="ej. 3003" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mb-2">
+      <input id="fBajaDepto" type="text" placeholder="ej. 3801 o 605" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mb-2">
       <p class="text-[11px] text-slate-400 mb-3">Se cancelarán TODAS las sesiones futuras confirmadas de este depto para este evento (a partir de hoy). Las sesiones ya pasadas no se tocan — quedan como historial.</p>
       <div class="flex gap-2">
         <button id="adminBtnVolverEvento3" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg py-2.5 transition">← Volver</button>
