@@ -512,7 +512,7 @@ function tarjetaEventoTexto(evento, incluirBoton = true, fechaSesion = null) {
         texto += `<label class="mr-1 mb-1.5 inline-flex items-center gap-1.5 text-[11px] font-bold bg-slate-100 hover:bg-slate-200 rounded-lg px-2.5 py-1.5 cursor-pointer select-none"><input type="checkbox" class="${chkGrupo}" value="${dia}"> ${dia}</label>`;
       });
       texto += `<br><label class="mr-1 mb-1.5 inline-flex items-center gap-1.5 text-[11px] font-bold bg-brand-50 text-brand-700 hover:bg-brand-100 rounded-lg px-2.5 py-1.5 cursor-pointer select-none"><input type="checkbox" class="${chkGrupo}Todos"> Todos los días</label>`;
-      texto += `<br><button onclick="window.iniciarRegistroDesdeTarjeta('${chkGrupo}','${evento.eventoid}','${evento.categoria}','${escapeHtml(evento.nombre).replace(/'/g, "\\'")}')" class="mt-1 inline-block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">✅ Registrarme en los días marcados</button>`;
+      texto += `<br><button onclick="window.iniciarRegistroDesdeTarjeta('${chkGrupo}','${evento.eventoid}','${evento.categoria}','${escapeHtml(evento.nombre).replace(/'/g, "\\'")}')" class="mt-1 inline-block text-[11px] font-bold text-ink-950 bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">✅ Registrarme en los días marcados</button>`;
     } else {
       const infoBoton = cupoInfo(evento, fechaSesion || evento.fecha);
       const bloqueado = infoBoton.lleno;
@@ -520,7 +520,7 @@ function tarjetaEventoTexto(evento, incluirBoton = true, fechaSesion = null) {
         texto += `\n<button disabled class="mt-2 block text-[11px] font-bold text-slate-400 bg-slate-100 rounded-lg px-3 py-1.5 cursor-not-allowed">Cupo lleno</button>`;
       } else {
         const fechaArg = fechaSesion ? `, '${fechaSesion}'` : "";
-        texto += `\n<button onclick="if(!this.disabled){this.disabled=true;this.textContent='Un momento…';window.iniciarRegistro('${evento.eventoid}','${evento.categoria}', '${escapeHtml(evento.nombre).replace(/'/g, "\\'")}'${fechaArg});}" class="mt-2 block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition disabled:opacity-50">✅ Registrarme</button>`;
+        texto += `\n<button onclick="if(!this.disabled){this.disabled=true;this.textContent='Un momento…';window.iniciarRegistro('${evento.eventoid}','${evento.categoria}', '${escapeHtml(evento.nombre).replace(/'/g, "\\'")}'${fechaArg});}" class="mt-2 block text-[11px] font-bold text-ink-950 bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition disabled:opacity-50">✅ Registrarme</button>`;
       }
     }
   }
@@ -693,7 +693,7 @@ window.iniciarRegistro = function(eventoId, categoria, nombreEvento, fechaSesion
     const fechaArg = fechaSesion || "";
     const diasCsv = (diasPreseleccionados && diasPreseleccionados.length) ? diasPreseleccionados.join(",") : "";
     addMessage(`Vamos a registrarte en *${nombreEvento}*.\n\n¿Uso los mismos datos de tu último registro? Depto *${deptoRecordado}*, nombre *${nombreRecordado}*.`, "bot");
-    const botones = `<button onclick="window.usarDatosRecordados('${eventoId}','${categoria}','${nombreEventoEsc}','${fechaArg}','${diasCsv}')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">✅ Sí, usar estos datos</button><button onclick="window.cambiarDatosRegistro('${eventoId}','${categoria}','${nombreEventoEsc}','${fechaArg}','${diasCsv}')" class="inline-block text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg px-3 py-1.5 transition">✏️ Usar otros datos</button>`;
+    const botones = `<button onclick="window.usarDatosRecordados('${eventoId}','${categoria}','${nombreEventoEsc}','${fechaArg}','${diasCsv}')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-ink-950 bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">✅ Sí, usar estos datos</button><button onclick="window.cambiarDatosRegistro('${eventoId}','${categoria}','${nombreEventoEsc}','${fechaArg}','${diasCsv}')" class="inline-block text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg px-3 py-1.5 transition">✏️ Usar otros datos</button>`;
     addMessage(botones, "bot");
     return;
   }
@@ -824,7 +824,7 @@ function mostrarBotonesDias(eventoId, categoria, depto, nombreAsistente, nombreE
     msg += `<label class="mr-1 mb-1.5 inline-flex items-center gap-1.5 text-[11px] font-bold bg-slate-100 hover:bg-slate-200 rounded-lg px-2.5 py-1.5 cursor-pointer select-none"><input type="checkbox" class="${grupoId} align-middle" value="${dia}"> ${dia}</label>`;
   });
   msg += `<br>`;
-  msg += `<button onclick="window.confirmarDiasSeleccionados('${grupoId}','${eventoId}','${categoria}','${depto}','${nombreAsistenteEsc}','${nombreEventoEsc}')" class="mt-1 mr-1.5 inline-block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">✅ Registrarme en los días marcados</button>`;
+  msg += `<button onclick="window.confirmarDiasSeleccionados('${grupoId}','${eventoId}','${categoria}','${depto}','${nombreAsistenteEsc}','${nombreEventoEsc}')" class="mt-1 mr-1.5 inline-block text-[11px] font-bold text-ink-950 bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">✅ Registrarme en los días marcados</button>`;
   msg += `<button onclick="window.elegirDiaRegistro('${eventoId}','${categoria}','${depto}','${nombreAsistenteEsc}','${nombreEventoEsc}','todos')" class="mt-1 inline-block text-[11px] font-bold text-white bg-brand-800 hover:bg-brand-900 rounded-lg px-3 py-1.5 transition">Todos los días</button>`;
   msg += `\n📌 El registro cubre solo las sesiones de este mes — el próximo mes deberás volver a confirmar.`;
   addMessage(msg, "bot");
@@ -911,7 +911,7 @@ function mostrarConfirmacionMultiSesion(eventoId, categoria, depto, nombreAsiste
     const nombreDia = DIAS_SEMANA_LARGOS[fechaDate.getDay()].slice(0, 3);
     msg += `   🟢 ${nombreDia} ${formatearFecha(fechaDate)}\n`;
   });
-  msg += `\n<button onclick="window.confirmarRegistroConFechas('${eventoId}','${categoria}','${depto}','${nombreAsistenteEsc}','${todasCsv}','${nombreEventoEsc}')" class="mt-1 mr-1.5 inline-block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">✅ Sí, registrarme a todas</button>`;
+  msg += `\n<button onclick="window.confirmarRegistroConFechas('${eventoId}','${categoria}','${depto}','${nombreAsistenteEsc}','${todasCsv}','${nombreEventoEsc}')" class="mt-1 mr-1.5 inline-block text-[11px] font-bold text-ink-950 bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">✅ Sí, registrarme a todas</button>`;
   msg += `<button onclick="window.elegirSesionesIndividualmente('${eventoId}','${categoria}','${depto}','${nombreAsistenteEsc}','${nombreEventoEsc}','${todasCsv}')" class="inline-block text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg px-3 py-1.5 transition">✏️ Elegir días específicos</button>`;
   addMessage(msg.trim(), "bot");
 }
@@ -935,7 +935,7 @@ function mostrarSeleccionSesiones(eventoId, categoria, depto, nombreAsistente, n
     msg += `<label class="mr-1 mb-1.5 inline-flex items-center gap-1.5 text-[11px] font-bold bg-slate-100 hover:bg-slate-200 rounded-lg px-2.5 py-1.5 cursor-pointer select-none"><input type="checkbox" class="${chkGrupo}" value="${fechaIso}"> ${nombreDia} ${formatearFecha(fechaDate)}</label>`;
   });
   msg += `<br><label class="mr-1 mb-1.5 inline-flex items-center gap-1.5 text-[11px] font-bold bg-brand-50 text-brand-700 hover:bg-brand-100 rounded-lg px-2.5 py-1.5 cursor-pointer select-none"><input type="checkbox" class="${chkGrupo}Todas"> Seleccionar todas</label>`;
-  msg += `<br><button onclick="window.confirmarSesionesSeleccionadas('${chkGrupo}','${eventoId}','${categoria}','${depto}','${nombreAsistenteEsc}','${nombreEventoEsc}')" class="mt-1 inline-block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">✅ Registrarme a las seleccionadas</button>`;
+  msg += `<br><button onclick="window.confirmarSesionesSeleccionadas('${chkGrupo}','${eventoId}','${categoria}','${depto}','${nombreAsistenteEsc}','${nombreEventoEsc}')" class="mt-1 inline-block text-[11px] font-bold text-ink-950 bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">✅ Registrarme a las seleccionadas</button>`;
   addMessage(msg.trim(), "bot");
 }
 
@@ -1173,7 +1173,7 @@ function tipSiguientePaso() {
 // registros y cancelar. Se usan en el mensaje de bienvenida, en "ayuda" y como pie
 // de casi todas las respuestas informativas (tipSiguientePaso).
 function mensajeBotonesBienvenida() {
-  return `<button onclick="window.handleQuickAction('Ver eventos de hoy')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">🎈 Eventos de hoy</button>`
+  return `<button onclick="window.handleQuickAction('Ver eventos de hoy')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-ink-950 bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">🎈 Eventos de hoy</button>`
     + `<button onclick="window.handleQuickAction('Ver programación de eventos de la semana')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg px-3 py-1.5 transition">📅 Programación de la semana</button>`
     + `<button onclick="window.handleQuickAction('Mis registros')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-violet-600 hover:bg-violet-700 rounded-lg px-3 py-1.5 transition">📋 Mis registros</button>`
     + `<button onclick="window.handleQuickAction('Cancelar mi registro')" class="mb-1.5 inline-block text-[11px] font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg px-3 py-1.5 transition">🗑️ Cancelar un registro</button>`;
@@ -1426,7 +1426,7 @@ function renderAdminPanel() {
       <p class="text-sm text-slate-600 mb-3">Ingresa el PIN de administración del Comité:</p>
       <input id="adminPinInput" type="password" autocomplete="off"
         class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-brand-500/40" placeholder="PIN">
-      <button id="adminPinContinuar" class="w-full bg-brand-600 hover:bg-brand-700 text-white text-sm font-bold rounded-lg py-2.5 transition">Continuar</button>
+      <button id="adminPinContinuar" class="w-full bg-brand-600 hover:bg-brand-700 text-ink-950 text-sm font-bold rounded-lg py-2.5 transition">Continuar</button>
     `;
     const input = document.getElementById("adminPinInput");
     const continuar = () => {
@@ -1540,7 +1540,7 @@ function renderAdminPanel() {
       </div>
       <div class="flex gap-2 mt-4">
         <button id="adminBtnVolverMenu1" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg py-2.5 transition">← Volver</button>
-        <button id="adminBtnGuardarEvento" class="flex-1 bg-brand-600 hover:bg-brand-700 text-white text-sm font-bold rounded-lg py-2.5 transition">Crear evento</button>
+        <button id="adminBtnGuardarEvento" class="flex-1 bg-brand-600 hover:bg-brand-700 text-ink-950 text-sm font-bold rounded-lg py-2.5 transition">Crear evento</button>
       </div>
     `;
     document.querySelectorAll(".fDiaSemana").forEach(chk => {
@@ -1960,7 +1960,7 @@ function mostrarDetalleCalendario(item) {
   if (info.lleno) {
     html += `<button disabled class="mt-2 w-full text-xs font-bold text-slate-400 bg-slate-100 rounded-lg px-3 py-2 cursor-not-allowed">Cupo lleno</button>`;
   } else {
-    html += `<button id="btnRegistrarDesdeCalendario" class="mt-2 w-full text-xs font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-2 transition">✅ Registrarme${esRecurrente(item) ? ` a esta sesión (${fecha})` : ""}</button>`;
+    html += `<button id="btnRegistrarDesdeCalendario" class="mt-2 w-full text-xs font-bold text-ink-950 bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-2 transition">✅ Registrarme${esRecurrente(item) ? ` a esta sesión (${fecha})` : ""}</button>`;
   }
 
   body.innerHTML = html;
