@@ -14,7 +14,7 @@ const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7
 
 // ⚠️ COPIA AQUÍ EL LINK DE IMPLEMENTACIÓN DE TU GOOGLE APPS SCRIPT (APLICACIÓN WEB /EXEC)
 // Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con Gemini.
-const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbz6gIPyQ3IT44KKkZNMEA4MnFckmQCclNZJ_HoItcL7bFXaXEPF5pbXGIxaoFFFDKk/exec";
+const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbzKJRviGzvBfOgmzaW8RCtrV5WMPZJy6LKFvtcJyJvBbD3Z2on-2qNXOXr9XGUSlXsN/exec";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -583,10 +583,13 @@ function respuestaPorCategoria(categoria) {
 // "qué hay en deportivos", "impacto comunitario") y regresa la clave de CATEGORIAS o null.
 function detectarCategoriaEnTexto(texto) {
   const n = normalizarTexto(texto);
-  if (n.includes("deportiv")) return "Deportivos";
-  if (n.includes("social")) return "Sociales";
-  if (n.includes("cultural")) return "Culturales";
-  if (n.includes("impacto") || n.includes("comunitari")) return "Impacto";
+  // "deportiv" no cubría "deporte"/"deportes" (sin el sufijo "-ivo"); "cultural" no
+  // cubría "cultura" (sin la "l" final) — por eso preguntas normales como "qué hay
+  // en deportes" o "eventos de cultura" caían en la IA en vez de responderse local.
+  if (/deport/.test(n)) return "Deportivos";
+  if (/social|sociabiliz|socializ/.test(n)) return "Sociales";
+  if (/cultur|\bculto\b|\bcultos\b/.test(n)) return "Culturales";
+  if (/impacto|comunitari|donaci|\bdonar\b|donativ|donando/.test(n)) return "Impacto";
   return null;
 }
 
@@ -1146,18 +1149,16 @@ async function ejecutarConsultaPropia(tipo, nombreFiltro, depto) {
   }
 }
 
-// Botones de seguimiento: ver semana / ver calendario del mes — se agregan al
-// final de la respuesta de "mis registros" para que el usuario pueda seguir
-// explorando otros eventos sin tener que volver a escribir el comando.
+// Botones de seguimiento: el usuario pidió que los 4 botones principales (hoy,
+// semana, mis registros, cancelar) aparezcan siempre, sin importar el contexto —
+// antes estas dos funciones mostraban subconjuntos distintos (2 o 3 botones) según
+// dónde se usaran, lo cual era inconsistente. Ahora ambas son el mismo set de 4.
 function botonesSeguimientoConsulta() {
-  return `<button onclick="window.handleQuickAction('Ver programación de eventos de la semana')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg px-3 py-1.5 transition">📅 Ver eventos de la semana</button><button onclick="window.abrirModalCalendario()" class="mb-1.5 inline-block text-[11px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg px-3 py-1.5 transition">📆 Ver calendario del mes</button>`;
+  return mensajeBotonesBienvenida();
 }
 
-// Mismos botones que arriba + "Mis registros" — se usa después de confirmar un
-// registro o una cancelación, para que el usuario pueda verificar el resultado o
-// seguir explorando sin tener que adivinar qué escribir.
 function botonesSeguimientoRegistro() {
-  return botonesSeguimientoConsulta() + `<button onclick="window.handleQuickAction('Mis registros')" class="mb-1.5 inline-block text-[11px] font-bold text-white bg-violet-600 hover:bg-violet-700 rounded-lg px-3 py-1.5 transition">📋 Ver mis registros</button>`;
+  return mensajeBotonesBienvenida();
 }
 
 // Tip de siguiente paso: se agrega al final de las respuestas informativas (hoy,
@@ -1330,13 +1331,16 @@ async function preguntarIA(pregunta) {
     const respuesta = await fetch(url, { method: "GET", cache: "no-store" });
     const data = await respuesta.json();
     if (data.error) {
+      // El detalle técnico (cuota excedida, error de red, etc.) queda solo en
+      // consola — al residente no le sirve ver un stack trace de Gemini, solo
+      // necesita saber que puede seguir usando el chat por otra vía.
       console.error("Error del agente IA:", data.detalle);
-      return `⚠️ Error del asistente IA:\n\n${data.detalle || "Sin detalle disponible."}`;
+      return `🤔 No pude generarte una respuesta para eso en este momento.\n\n💬 ¿Qué más quieres hacer?\n` + mensajeBotonesBienvenida();
     }
     return `🤖 *Respuesta generada por IA:*\n\n${data.respuesta_ia}`;
   } catch (error) {
     console.error("Error de red al llamar al agente IA:", error);
-    return `⚠️ Error de conexión al llamar al agente IA:\n\n${error.toString()}`;
+    return `🤔 No pude conectarme con el asistente en este momento.\n\n💬 ¿Qué más quieres hacer?\n` + mensajeBotonesBienvenida();
   }
 }
 
