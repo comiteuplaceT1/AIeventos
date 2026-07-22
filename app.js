@@ -14,7 +14,7 @@ const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7
 
 // ⚠️ COPIA AQUÍ EL LINK DE IMPLEMENTACIÓN DE TU GOOGLE APPS SCRIPT (APLICACIÓN WEB /EXEC)
 // Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con Gemini.
-const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbxwj8qMFP8E4c6Umd3Ei4MZRu2A4TnvApZghyWr7pDpmgSjGl9nnRBq7VzIujGs44PX/exec";
+const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbxbAENz2lkjUoxrWiX8I8dfFkUA5WpWL5vyaI2aaImqwIjqdZz68WjdGPc2W2WmMOWK/exec";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -380,6 +380,7 @@ function normalizarEventos(lista, categoria) {
     tienecosto: String(ev["tienecosto"] || "").trim().toLowerCase() === "si",
     diasemana: String(ev["diassemana"] || "").split(",").map(d => d.trim()).filter(d => d),
     fechafin: ev["fechafin"] || "",
+    detalledias: ev["detalledias"] || "",
     categoria
   })).filter(ev => ev.eventoid && ev.fecha);
 }
@@ -443,6 +444,32 @@ function recurrenciaTexto(evento) {
   const dias = evento.diasemana.join(", ");
   const fin = evento.fechafin ? formatearFecha(parseFechaLocal(evento.fechafin)) : "sin fecha fin definida";
   return `🔁 Se repite: ${dias} · hasta ${fin}`;
+}
+
+// Interpreta el campo DetalleDias (ej. "Martes:Box,Miércoles:Zumba,Jueves:Yoga")
+// para eventos recurrentes donde cada día de la semana es una actividad
+// distinta. Regresa un mapa { "martes": "Box", "miercoles": "Zumba", ... }
+// (claves normalizadas sin acentos) o {} si el evento no usa este detalle.
+function mapaDetalleDias(evento) {
+  if (!evento.detalledias) return {};
+  const mapa = {};
+  evento.detalledias.split(",").forEach(par => {
+    const partes = par.split(":");
+    if (partes.length < 2) return;
+    const dia = normalizarTexto(partes[0]);
+    const actividad = partes.slice(1).join(":").trim();
+    if (dia && actividad) mapa[dia] = actividad;
+  });
+  return mapa;
+}
+
+// Actividad específica de una fecha dada (según el día de la semana que le
+// toque), o "" si el evento no tiene detalle por día configurado.
+function actividadDelDia(evento, fechaDate) {
+  const mapa = mapaDetalleDias(evento);
+  if (!Object.keys(mapa).length) return "";
+  const nombreDia = normalizarTexto(DIAS_SEMANA_LARGOS[fechaDate.getDay()]);
+  return mapa[nombreDia] || "";
 }
 
 function crearSeccionMenu(titulo, idLista) {
@@ -538,9 +565,12 @@ function tarjetaEventoTexto(evento, incluirBoton = true, fechaSesion = null) {
     if (proximas.length) {
       lineas.push(`👥 *Próximas sesiones y su cupo:*`);
       proximas.forEach(info => {
-        const nombreDia = DIAS_SEMANA_LARGOS[parseFechaLocal(info.fecha).getDay()];
+        const fechaDate = parseFechaLocal(info.fecha);
+        const nombreDia = DIAS_SEMANA_LARGOS[fechaDate.getDay()];
         const badge = info.sinLimite ? "🟢" : (info.lleno ? "🔴" : "🟢");
-        lineas.push(`   ${badge} ${nombreDia.slice(0, 3)} ${formatearFecha(parseFechaLocal(info.fecha))} — ${info.texto}`);
+        const actividad = actividadDelDia(evento, fechaDate);
+        const etiquetaActividad = actividad ? ` — ${actividad}` : "";
+        lineas.push(`   ${badge} ${nombreDia.slice(0, 3)} ${formatearFecha(fechaDate)}${etiquetaActividad} — ${info.texto}`);
       });
     } else {
       lineas.push(`👥 No hay sesiones futuras dentro del rango de esta serie.`);
@@ -580,6 +610,7 @@ window.iniciarRegistroDesdeTarjeta = function(chkGrupo, eventoId, categoria, nom
 
 function mostrarTarjetaEventoEnChat(evento) {
   addMessage(tarjetaEventoTexto(evento), "bot");
+  addMessage(mensajeBotonesBienvenida(), "bot");
 }
 
 function buscarEventoPorId(eventoId, categoria) {
@@ -1183,7 +1214,7 @@ function mensajeBotonesBienvenida() {
     + `<button onclick="window.handleQuickAction('Ver eventos de hoy')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">🎈 Eventos de hoy</button>`
     + `<button onclick="window.handleQuickAction('Ver eventos de la semana')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg px-3 py-1.5 transition">📅 Eventos de la Semana</button>`
     + `<button onclick="window.abrirModalCalendario()" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg px-3 py-1.5 transition">📆 Calendario Mensual</button>`
-    + `<button onclick="window.abrirModalEventoRegistro('verificar_identidad')" class="mb-1.5 inline-block text-[11px] font-bold text-white bg-violet-600 hover:bg-violet-700 rounded-lg px-3 py-1.5 transition">📋 Consultar mis registros o realizar cancelación</button>`;
+    + `<button onclick="window.abrirModalEventoRegistro('verificar_identidad')" class="mb-1.5 inline-block text-[11px] font-bold text-white bg-violet-600 hover:bg-violet-700 rounded-lg px-3 py-1.5 transition">📋 Mis Registros / Cancelar</button>`;
 }
 
 // Registros del último "mis registros" agrupados por evento, guardados en memoria
@@ -1384,7 +1415,7 @@ async function procesarMensajeUsuario(txt) {
     return;
   }
   if (detectarIntentCancelarPropio(txt) || detectarIntentConsultarPropio(txt)) {
-    addMessage("Para eso usa el menú *Consultar mis registros o realizar cancelación* — así verificamos que eres tú antes de mostrar o modificar cualquier registro:", "bot");
+    addMessage("Para eso usa el menú *Mis Registros / Cancelar* — así verificamos que eres tú antes de mostrar o modificar cualquier registro:", "bot");
     window.abrirModalEventoRegistro("verificar_identidad");
     return;
   }
@@ -1586,6 +1617,11 @@ function renderAdminPanel() {
             <input id="fFechaFin" type="date" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
             <p class="text-[10px] text-slate-400 mt-1">La fecha de arriba es el inicio; se repetirá en los días marcados hasta esta fecha.</p>
           </div>
+          <div id="wrapperDetalleDias" class="hidden mt-2.5">
+            <label class="block text-xs font-bold text-slate-500 mb-1">¿Cada día es una actividad distinta? (opcional)</label>
+            <input id="fDetalleDias" type="text" placeholder="Ej: Martes:Box, Miércoles:Zumba, Jueves:Yoga" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+            <p class="text-[10px] text-slate-400 mt-1">Solo si aplica (ej. un paquete de clases grupales donde cada día es otra actividad). Formato "Día:Actividad" separados por comas. Déjalo vacío si todas las sesiones son la misma actividad (ej. Zumba todos los días marcados).</p>
+          </div>
         </div>
       </div>
       <div class="flex gap-2 mt-4">
@@ -1597,6 +1633,7 @@ function renderAdminPanel() {
       chk.addEventListener("change", () => {
         const algunoMarcado = Array.from(document.querySelectorAll(".fDiaSemana")).some(c => c.checked);
         document.getElementById("wrapperFechaFin").classList.toggle("hidden", !algunoMarcado);
+        document.getElementById("wrapperDetalleDias").classList.toggle("hidden", !algunoMarcado);
       });
     });
     document.getElementById("fSinHora").addEventListener("change", (e) => {
@@ -1784,6 +1821,7 @@ async function crearEventoDesdeAdmin() {
   const diasSeleccionados = Array.from(document.querySelectorAll(".fDiaSemana:checked")).map(c => c.value);
   const diasSemana = diasSeleccionados.join(",");
   const fechaFin = diasSeleccionados.length ? document.getElementById("fFechaFin").value : "";
+  const detalleDias = diasSeleccionados.length ? document.getElementById("fDetalleDias").value.trim() : "";
 
   if (!nombre || !fecha) {
     alert("Nombre y fecha son obligatorios.");
@@ -1807,7 +1845,7 @@ async function crearEventoDesdeAdmin() {
   }
 
   try {
-    const url = `${URL_AGENTE_EVENTOS}?accion=crear_evento&pin=${encodeURIComponent(adminState.pin)}&categoria=${encodeURIComponent(categoria)}&nombre=${encodeURIComponent(nombre)}&descripcion=${encodeURIComponent(descripcion)}&fecha=${encodeURIComponent(fecha)}&horaInicio=${encodeURIComponent(horaInicio)}&horaFin=${encodeURIComponent(horaFin)}&ubicacion=${encodeURIComponent(ubicacion)}&cupoTotal=${encodeURIComponent(cupoTotal)}&sinCupo=${sinCupo ? "1" : "0"}&tieneCosto=${tieneCosto ? "1" : "0"}&diasSemana=${encodeURIComponent(diasSemana)}&fechaFin=${encodeURIComponent(fechaFin)}&huellasMaxDepto=${encodeURIComponent(huellasMaxDepto)}`;
+    const url = `${URL_AGENTE_EVENTOS}?accion=crear_evento&pin=${encodeURIComponent(adminState.pin)}&categoria=${encodeURIComponent(categoria)}&nombre=${encodeURIComponent(nombre)}&descripcion=${encodeURIComponent(descripcion)}&fecha=${encodeURIComponent(fecha)}&horaInicio=${encodeURIComponent(horaInicio)}&horaFin=${encodeURIComponent(horaFin)}&ubicacion=${encodeURIComponent(ubicacion)}&cupoTotal=${encodeURIComponent(cupoTotal)}&sinCupo=${sinCupo ? "1" : "0"}&tieneCosto=${tieneCosto ? "1" : "0"}&diasSemana=${encodeURIComponent(diasSemana)}&fechaFin=${encodeURIComponent(fechaFin)}&huellasMaxDepto=${encodeURIComponent(huellasMaxDepto)}&detalleDias=${encodeURIComponent(detalleDias)}`;
     const res = await fetch(url, { cache: "no-store" });
     const data = await res.json();
     if (data.ok) {
@@ -2183,7 +2221,7 @@ function renderModalEventoRegistro() {
     body.innerHTML = `
       <div class="space-y-2">
         <button id="regBtnNuevo" class="w-full bg-brand-600 hover:bg-brand-700 text-white text-sm font-bold rounded-lg py-3 transition">✅ Registrarme a un evento nuevo</button>
-        <button id="regBtnConsultar" class="w-full bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold rounded-lg py-3 transition">📋 Consultar mis registros o realizar cancelación</button>
+        <button id="regBtnConsultar" class="w-full bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold rounded-lg py-3 transition">📋 Mis Registros / Cancelar</button>
       </div>
     `;
     document.getElementById("regBtnNuevo").addEventListener("click", () => { regModal.paso = "categorias"; renderModalEventoRegistro(); });
@@ -2453,7 +2491,7 @@ function renderFormularioEvento() {
       regModal.fechasDisponiblesMes.forEach(f => {
         const info = cupoInfo(ev, f);
         const fechaDate = parseFechaLocal(f);
-        const etiqueta = `${DIAS_SEMANA_LARGOS[fechaDate.getDay()].slice(0, 3)} ${formatearFecha(fechaDate)}`;
+        const etiqueta = `${DIAS_SEMANA_LARGOS[fechaDate.getDay()].slice(0, 3)} ${formatearFecha(fechaDate)}${actividadDelDia(ev, fechaDate) ? " — " + actividadDelDia(ev, fechaDate) : ""}`;
         fechasHtml += `<label class="flex items-center gap-2 text-xs font-medium ${info.lleno ? "opacity-40" : ""}"><input type="checkbox" class="regFechaChk" value="${f}" ${info.lleno ? "disabled" : ""} ${regModal.fechasSeleccionadas.includes(f) ? "checked" : ""}> ${etiqueta} ${info.lleno ? "· 🔴 lleno" : ""}</label>`;
       });
       fechasHtml += `</div><label class="flex items-center gap-2 text-xs font-bold text-brand-700 mb-2"><input type="checkbox" id="regFechaTodas"> Seleccionar todas las disponibles</label>`;
@@ -2498,7 +2536,7 @@ function renderFormularioEvento() {
       ${huellasInfoHtml}
       ${ev.tienecosto ? `
       <div>
-        <label class="block text-xs font-bold text-slate-500 mb-1">Comprobante de pago (foto)</label>
+        <label class="block text-xs font-bold text-slate-500 mb-1">Comprobante de pago (foto, opcional)</label>
         <input id="regFoto" type="file" accept="image/*" class="w-full text-xs">
         ${regModal.fotoBase64 ? `<p class="text-[11px] text-emerald-600 font-bold mt-1">✅ Foto cargada (${escapeHtml(regModal.fotoNombre || "")})</p>` : ""}
       </div>` : ""}
@@ -2573,7 +2611,7 @@ function renderFormularioEvento() {
     if (!regModal.nombreAsistente || regModal.nombreAsistente.trim().length < 3) { regModal.errorFormulario = "Indica el nombre completo del asistente."; renderFormularioEvento(); return; }
     if (regModal.tieneAcompanantes && regModal.numAcompanantes > 0 && !regModal.nombresAcompanantes.trim()) { regModal.errorFormulario = "Indica el/los nombre(s) de tus acompañantes."; renderFormularioEvento(); return; }
     if (recurrenteSinFecha && !regModal.fechasSeleccionadas.length) { regModal.errorFormulario = "Marca al menos una fecha para registrarte."; renderFormularioEvento(); return; }
-    if (ev.tienecosto && !regModal.fotoBase64) { regModal.errorFormulario = "Este evento tiene costo: adjunta tu comprobante de pago."; renderFormularioEvento(); return; }
+    // El comprobante de pago es opcional — no bloquea el registro aunque el evento tenga costo.
     if (!regModal.aceptaTerminos) { regModal.errorFormulario = "Debes aceptar el aviso de responsabilidad para continuar."; renderFormularioEvento(); return; }
     regModal.mostrandoConfirmacion = true;
     renderModalEventoRegistro();
@@ -2595,7 +2633,7 @@ function renderConfirmacionRegistro() {
       <p><strong>Depto:</strong> ${escapeHtml(regModal.depto)}</p>
       <p><strong>Asistente:</strong> ${escapeHtml(regModal.nombreAsistente)}</p>
       ${regModal.numAcompanantes > 0 ? `<p><strong>Acompañantes:</strong> ${regModal.numAcompanantes} — ${escapeHtml(regModal.nombresAcompanantes || "")}</p>` : ""}
-      ${ev.tienecosto ? `<p><strong>Comprobante:</strong> ${regModal.fotoBase64 ? "Adjuntado ✅" : "⚠️ No adjuntado"}</p>` : ""}
+      ${ev.tienecosto ? `<p><strong>Comprobante:</strong> ${regModal.fotoBase64 ? "Adjuntado ✅" : "No adjuntado (opcional)"}</p>` : ""}
     </div>
     ${regModal.errorFormulario ? `<p class="text-xs font-bold text-red-600 mb-2">⚠️ ${escapeHtml(regModal.errorFormulario)}</p>` : ""}
     <div class="flex gap-2">
