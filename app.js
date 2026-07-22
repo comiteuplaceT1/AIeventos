@@ -90,20 +90,54 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+// Parser CSV robusto (máquina de estados, carácter por carácter). El anterior
+// partía el texto por saltos de línea ANTES de fijarse si estaban dentro de
+// comillas — así que cualquier descripción con salto de línea embebido (ej.
+// "Estos son los paquetes:\nClase Suelta...\nBOX - Cada Martes...") se cortaba
+// a la mitad, generando "filas" fantasma con columnas corridas (por eso salía
+// "Zumba" como si fuera un evento aparte: era un fragmento de la descripción
+// larga de "Clases Grupales Deportivas" mal cortado). Este parser sí entiende
+// comillas con comas/saltos de línea adentro, y comillas escapadas ("").
+function parseCSVCompleto(texto) {
+  const filas = [];
+  let fila = [];
+  let campo = "";
+  let dentroComillas = false;
+  for (let i = 0; i < texto.length; i++) {
+    const c = texto[i];
+    if (dentroComillas) {
+      if (c === '"') {
+        if (texto[i + 1] === '"') { campo += '"'; i++; }
+        else { dentroComillas = false; }
+      } else {
+        campo += c;
+      }
+    } else if (c === '"') {
+      dentroComillas = true;
+    } else if (c === ",") {
+      fila.push(campo); campo = "";
+    } else if (c === "\r") {
+      // se ignora; el salto real de fila lo maneja el \n
+    } else if (c === "\n") {
+      fila.push(campo); campo = "";
+      filas.push(fila); fila = [];
+    } else {
+      campo += c;
+    }
+  }
+  if (campo.length > 0 || fila.length > 0) { fila.push(campo); filas.push(fila); }
+  return filas;
+}
+
 function csvAObjetos(textoCsv) {
-  const lineas = textoCsv.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-  if (lineas.length <= 1) return [];
-  const separador = ",";
-  const cabeceras = lineas[0].split(separador).map(c => c.replace(/^"|"$/g, '').trim().toLowerCase());
+  const filas = parseCSVCompleto(textoCsv).filter(f => f.some(v => String(v).trim() !== ""));
+  if (filas.length <= 1) return [];
+  const cabeceras = filas[0].map(c => String(c).trim().toLowerCase());
   const resultados = [];
-  for (let i = 1; i < lineas.length; i++) {
-    const regex = new RegExp(`${separador}(?=(?:(?:[^"]*"){2})*[^"]*$)`);
-    const valores = lineas[i].split(regex).map(v => v.replace(/^"|"$/g, '').trim());
+  for (let i = 1; i < filas.length; i++) {
     const obj = {};
     cabeceras.forEach((cab, index) => {
-      let val = valores[index] ? valores[index].trim() : "";
-      val = val.replace(/\r/g, "").trim();
-      obj[cab] = val;
+      obj[cab] = filas[i][index] !== undefined ? String(filas[i][index]).trim() : "";
     });
     resultados.push(obj);
   }
