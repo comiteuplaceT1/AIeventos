@@ -14,7 +14,7 @@ const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7
 
 // ⚠️ COPIA AQUÍ EL LINK DE IMPLEMENTACIÓN DE TU GOOGLE APPS SCRIPT (APLICACIÓN WEB /EXEC)
 // Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con Gemini.
-const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbzeZdWidCBY28Su4orKDZXmnIbnnnpYSZ6lrjl-qNkB5b5DZCeMDjjQJvznI6unzldX/exec";
+const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbxwj8qMFP8E4c6Umd3Ei4MZRu2A4TnvApZghyWr7pDpmgSjGl9nnRBq7VzIujGs44PX/exec";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -347,7 +347,7 @@ function normalizarEventos(lista, categoria) {
     diasemana: String(ev["diassemana"] || "").split(",").map(d => d.trim()).filter(d => d),
     fechafin: ev["fechafin"] || "",
     categoria
-  })).filter(ev => ev.eventoid);
+  })).filter(ev => ev.eventoid && ev.fecha);
 }
 
 // ---------- Recurrencia semanal (clases tipo Zumba Lun/Mié/Sáb) ----------
@@ -425,6 +425,20 @@ function crearSeccionMenu(titulo, idLista) {
   return container;
 }
 
+// Resumen de cupo para la tarjeta del sidebar de un evento recurrente: usa la
+// PRÓXIMA sesión del mes con lugar disponible (no "Recurrente" a secas). Si
+// todas las sesiones restantes del mes están llenas, se marca como lleno.
+function infoCupoResumenRecurrente(evento) {
+  const ocurrencias = ocurrenciasDelMesActual(evento);
+  if (!ocurrencias.length) return { lleno: true, texto: "Sin sesiones este mes" };
+  for (let i = 0; i < ocurrencias.length; i++) {
+    const info = cupoInfo(evento, fechaISO(ocurrencias[i]));
+    if (!info.lleno) return { lleno: false, texto: info.sinLimite ? info.texto : `${info.texto} (próx. sesión)` };
+  }
+  return { lleno: true, texto: "Cupo Lleno" };
+}
+
+
 function inyectarSubmenuEventos(idContenedor, eventos, categoria, emoji) {
   const contenedor = document.getElementById(idContenedor);
   if (!contenedor) return;
@@ -437,12 +451,12 @@ function inyectarSubmenuEventos(idContenedor, eventos, categoria, emoji) {
   }
   eventos.forEach(evento => {
     const recurrente = esRecurrente(evento);
-    const badgeTexto = recurrente ? "🔁 Recurrente" : cupoInfo(evento, evento.fecha).texto;
-    const badgeLleno = recurrente ? false : cupoInfo(evento, evento.fecha).lleno;
+    const badgeTexto = recurrente ? infoCupoResumenRecurrente(evento).texto : cupoInfo(evento, evento.fecha).texto;
+    const badgeLleno = recurrente ? infoCupoResumenRecurrente(evento).lleno : cupoInfo(evento, evento.fecha).lleno;
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "group relative w-full text-left px-3 py-2 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-lg transition flex items-center justify-between gap-2 font-medium border-l-2 border-transparent hover:border-brand-500";
-    btn.innerHTML = `<span class="truncate">${emoji} ${escapeHtml(evento.nombre)}</span><span class="text-[10px] font-bold ${badgeLleno ? 'text-red-500' : (recurrente ? 'text-indigo-600' : 'text-emerald-600')} shrink-0">${badgeTexto}</span>
+    btn.innerHTML = `<span class="truncate">${emoji} ${escapeHtml(evento.nombre)}</span><span class="text-[10px] font-bold ${badgeLleno ? 'text-red-500' : 'text-emerald-600'} shrink-0">${badgeTexto}</span>
       <span class="pointer-events-none absolute left-1 right-1 bottom-[calc(100%+6px)] z-50 hidden group-hover:flex justify-center">
         <span class="relative max-w-[240px] bg-slate-900 text-white text-[11px] font-semibold leading-snug text-center rounded-lg px-2.5 py-1.5 shadow-lg whitespace-normal break-words">
           ${escapeHtml(evento.nombre)}
@@ -1520,9 +1534,9 @@ function renderAdminPanel() {
           <input id="fCupo" type="number" min="1" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
         </div>
         <div>
-          <label class="block text-xs font-bold text-slate-500 mb-1">Personas del mismo depto por sesión</label>
-          <input id="fHuellasMaxDepto" type="number" min="1" placeholder="1 (dejar vacío = 1 persona por depto)" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-          <p class="text-[10px] text-slate-400 mt-1">Normalmente 1. Súbelo para eventos tipo suscripción o inscripción por pareja/familia donde un mismo depto puede anotar a varias personas en la misma sesión.</p>
+          <label class="block text-xs font-bold text-slate-500 mb-1">Excepción de personas por depto (opcional)</label>
+          <input id="fHuellasMaxDepto" type="number" min="1" placeholder="Vacío = usa el máximo real de huellas del depto" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          <p class="text-[10px] text-slate-400 mt-1">Por default, cada depto puede registrar hasta el número de huellas que tiene asignadas en la pestaña "Departamentos" del Sheet (titular + acompañantes cuentan como huellas). Llena este campo SOLO si este evento en particular necesita un tope distinto (ej. máximo 2 por depto aunque el depto tenga más huellas).</p>
         </div>
         <div class="border-t border-slate-100 pt-2.5">
           <label class="block text-xs font-bold text-slate-500 mb-1.5">¿Se repite cada semana? (ej. Zumba Lun/Mié/Sáb)</label>
