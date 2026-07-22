@@ -1305,6 +1305,38 @@ window.cancelarMiRegistroDesdeChat = async function(depto, registroIdsCsv, etiqu
   }
 };
 
+// ---------- Chat IA (fallback vía Apps Script + Gemini) ----------
+// Se usa SOLO cuando ningún patrón local coincide (ver responderMensajeLocal /
+// procesarMensajeUsuario) — es decir, para preguntas abiertas que no son "hoy",
+// "semana", una categoría, un evento por nombre, "mis registros" o "cancelar".
+// El backend (accion=chat en Code.gs) enruta vía OpenRouter con fallback de modelo
+// (DeepSeek gratuito -> Gemini gratuito), así que aquí solo hace falta cubrir
+// errores de red/timeout del lado del navegador y respuestas con {error: true}.
+async function preguntarAgenteIA(pregunta) {
+  try {
+    const url = `${URL_AGENTE_EVENTOS}?accion=chat&pregunta=${encodeURIComponent(pregunta)}`;
+    const res = await fetch(url, { method: "GET", cache: "no-store" });
+    const data = await res.json();
+
+    if (data.error) {
+      console.error("Error del agente IA:", data.detalle || data.error);
+      return null; // se resuelve con el mensaje de ayuda fijo, no con el error crudo
+    }
+    if (!data.respuesta_ia) return null;
+    // El backend actual regresa el error de OpenRouter como texto dentro de
+    // respuesta_ia cuando ambos modelos fallan — no debe mostrarse al residente
+    // como si fuera una respuesta real de la IA.
+    if (String(data.respuesta_ia).startsWith("Error OpenRouter:")) {
+      console.error("Error del agente IA (OpenRouter):", data.respuesta_ia);
+      return null;
+    }
+    return data.respuesta_ia;
+  } catch (error) {
+    console.error("Error de red al llamar al agente IA:", error);
+    return null;
+  }
+}
+
 // ---------- Router de mensajes ----------
 function responderMensajeLocal(textoOriginal) {
   const texto = textoOriginal.trim();
@@ -1331,10 +1363,6 @@ function responderMensajeLocal(textoOriginal) {
 
   return null; // sin match local (o mención del evento sin intención operativa) -> se consulta a la IA
 }
-
-// Nota: se retiró la integración con el chat de Gemini (accion=chat) por errores
-// recurrentes del lado del asistente IA. Ahora, si ningún patrón local coincide,
-// se muestra un mensaje de ayuda fijo en procesarMensajeUsuario().
 
 // Router unificado: TODO mensaje del usuario (venga de texto escrito o de un botón
 // de acción rápida) pasa por aquí, en el mismo orden de prioridad. Antes, los
@@ -1370,8 +1398,21 @@ async function procesarMensajeUsuario(txt) {
     return;
   }
 
-  const respuestaSinMatch = `🤔 No estoy seguro de haber entendido eso. Puedo ayudarte con:\n\n🎈 *"Eventos de hoy"* — qué hay programado hoy\n📅 *"Eventos de la Semana"* — agenda completa\n🔍 El *nombre de un evento* (ej. "días y horario de Zumba")\n✅ *"Quiero registrarme en [evento]"*\n📋 *"Mis registros"*\n🗑️ *"Cancelar mi registro"*\n\n📂 También puedes usar el menú de la izquierda por categoría.\n\n¿Qué te gustaría hacer?` + "\n\n" + mensajeBotonesBienvenida();
-  setTimeout(() => { addMessage(respuestaSinMatch, "bot"); }, 300);
+  // Nada de lo anterior hizo match: se consulta al agente IA (Gemini vía Apps Script)
+  // como último recurso, mostrando un mensaje temporal mientras responde. Si Gemini
+  // falla (cuota, modelo caído, timeout, etc.) se elimina el mensaje temporal y se
+  // cae al mensaje de ayuda fijo con los 4 botones, en vez de mostrar un error crudo.
+  const pensando = addMessage("🤖 Consultando al asistente IA…", "bot");
+  const respuestaIA = await preguntarAgenteIA(txt);
+  if (pensando && pensando.parentNode) pensando.remove();
+
+  if (respuestaIA) {
+    addMessage(`🤖 ${respuestaIA}`, "bot");
+    return;
+  }
+
+  const respuestaSinMatch = `🤔 No pude generarte una respuesta para eso ahora mismo. Puedo ayudarte con:\n\n🎈 *"Eventos de hoy"* — qué hay programado hoy\n📅 *"Eventos de la Semana"* — agenda completa\n🔍 El *nombre de un evento* (ej. "días y horario de Zumba")\n✅ *"Quiero registrarme en [evento]"*\n📋 *"Mis registros"*\n🗑️ *"Cancelar mi registro"*\n\n📂 También puedes usar el menú de la izquierda por categoría.\n\n¿Qué te gustaría hacer?` + "\n\n" + mensajeBotonesBienvenida();
+  addMessage(respuestaSinMatch, "bot");
 }
 
 if (chatForm) {
