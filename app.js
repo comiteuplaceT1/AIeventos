@@ -14,7 +14,7 @@ const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7
 
 // ⚠️ COPIA AQUÍ EL LINK DE IMPLEMENTACIÓN DE TU GOOGLE APPS SCRIPT (APLICACIÓN WEB /EXEC)
 // Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con Gemini.
-const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbxcVPp91IUcGUgELaAv3l0S1d2YqbxIsc-cZPVh_pkVCIepOj2rn9e1DJHDaE_OGXwo/exec";
+const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbz-SK-UWQfU04V8agHNyP8dY2EzwNvEt0BPwYrWi1auTtJ6ATqKL_FCmfWuMJ-CfhZm/exec";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -506,50 +506,28 @@ function tarjetaEventoTexto(evento, incluirBoton = true, fechaSesion = null) {
 
   let texto = lineas.join("\n");
   if (incluirBoton) {
-    if (recurrente && !fechaSesion) {
-      // Evento recurrente visto sin una sesión puntual (ej. desde el menú lateral o
-      // una búsqueda por nombre): se ofrece el selector de días AQUÍ MISMO, en vez
-      // de esperar a que termine el flujo de depto/nombre para preguntarlo. El
-      // residente elige de una vez Lunes / Martes / Miércoles / Todos, igual que ya
-      // se hace para elegir qué sesiones cancelar.
-      const chkGrupo = `tarjetaDias${evento.eventoid}${Date.now()}`;
-      texto += `\n👉 *¿A qué día(s) quieres registrarte?*\n`;
-      evento.diasemana.forEach(dia => {
-        texto += `<label class="mr-1 mb-1.5 inline-flex items-center gap-1.5 text-[11px] font-bold bg-slate-100 hover:bg-slate-200 rounded-lg px-2.5 py-1.5 cursor-pointer select-none"><input type="checkbox" class="${chkGrupo}" value="${dia}"> ${dia}</label>`;
-      });
-      texto += `<br><label class="mr-1 mb-1.5 inline-flex items-center gap-1.5 text-[11px] font-bold bg-brand-50 text-brand-700 hover:bg-brand-100 rounded-lg px-2.5 py-1.5 cursor-pointer select-none"><input type="checkbox" class="${chkGrupo}Todos"> Todos los días</label>`;
-      texto += `<br><button onclick="window.iniciarRegistroDesdeTarjeta('${chkGrupo}','${evento.eventoid}','${evento.categoria}','${escapeHtml(evento.nombre).replace(/'/g, "\\'")}')" class="mt-1 inline-block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">✅ Registrarme en los días marcados</button>`;
+    // La selección de fecha/sesión (para eventos recurrentes) ahora vive DENTRO
+    // del modal "Registrarme a Evento" (checkboxes por fecha + "todas"), no aquí
+    // en la tarjeta del chat — un solo botón abre el modal ya con el evento
+    // preseleccionado, con o sin sesión puntual.
+    const bloqueadoDelTodo = recurrente
+      ? ocurrenciasDelMesActual(evento).length > 0 && ocurrenciasDelMesActual(evento).every(f => cupoInfo(evento, fechaISO(f)).lleno)
+      : cupoInfo(evento, fechaSesion || evento.fecha).lleno;
+    if (bloqueadoDelTodo) {
+      texto += `\n<button disabled class="mt-2 block text-[11px] font-bold text-slate-400 bg-slate-100 rounded-lg px-3 py-1.5 cursor-not-allowed">Cupo lleno</button>`;
     } else {
-      const infoBoton = cupoInfo(evento, fechaSesion || evento.fecha);
-      const bloqueado = infoBoton.lleno;
-      if (bloqueado) {
-        texto += `\n<button disabled class="mt-2 block text-[11px] font-bold text-slate-400 bg-slate-100 rounded-lg px-3 py-1.5 cursor-not-allowed">Cupo lleno</button>`;
-      } else {
-        const fechaArg = fechaSesion ? `, '${fechaSesion}'` : "";
-        texto += `\n<button onclick="if(!this.disabled){this.disabled=true;this.textContent='Un momento…';window.iniciarRegistro('${evento.eventoid}','${evento.categoria}', '${escapeHtml(evento.nombre).replace(/'/g, "\\'")}'${fechaArg});}" class="mt-2 block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition disabled:opacity-50">✅ Registrarme</button>`;
-      }
+      const fechaArg = fechaSesion ? `, '${fechaSesion}'` : "";
+      texto += `\n<button onclick="window.iniciarRegistro('${evento.eventoid}','${evento.categoria}', '${escapeHtml(evento.nombre).replace(/'/g, "\\'")}'${fechaArg})" class="mt-2 block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">✅ Registrarme</button>`;
     }
   }
   return texto;
 }
 
-// Lee el selector de días embebido en la tarjeta de un evento recurrente y arranca
-// el flujo de registro ya con los días elegidos (o todos) para no volver a
-// preguntarlos después de pedir depto/nombre.
+// Compatibilidad hacia atrás por si algún mensaje viejo en el historial del
+// chat todavía referencia el selector embebido (ya no se genera en tarjetas
+// nuevas — ver tarjetaEventoTexto). Simplemente delega en iniciarRegistro.
 window.iniciarRegistroDesdeTarjeta = function(chkGrupo, eventoId, categoria, nombreEvento) {
-  const evento = buscarEventoPorId(eventoId, categoria);
-  const todosChk = document.querySelector(`.${chkGrupo}Todos`);
-  const dias = (todosChk && todosChk.checked)
-    ? (evento ? evento.diasemana.slice() : [])
-    : Array.from(document.querySelectorAll(`.${chkGrupo}:checked`)).map(c => c.value);
-
-  if (!dias.length) {
-    addMessage("Marca al menos un día (o *Todos los días*) antes de registrarte.", "bot");
-    return;
-  }
-  const etiquetaDias = (evento && dias.length === evento.diasemana.length) ? "Todos los días" : dias.join(" y ");
-  addMessage(`Registrarme en *${nombreEvento}* — ${etiquetaDias}`, "user");
-  window.iniciarRegistro(eventoId, categoria, nombreEvento, null, dias);
+  window.iniciarRegistro(eventoId, categoria, nombreEvento, null);
 };
 
 function mostrarTarjetaEventoEnChat(evento) {
@@ -674,16 +652,17 @@ function tieneIntencionOperativa(texto) {
   return PALABRAS_INTENCION_OPERATIVA.some(p => n.includes(p));
 }
 
-// ---------- Flujo de registro conversacional ----------
-// diasPreseleccionados (opcional): días ya elegidos desde el selector embebido en
-// la tarjeta del evento (iniciarRegistroDesdeTarjeta). Si vienen, el flujo de
-// depto/nombre no vuelve a preguntar los días — pasa directo a calcular fechas.
-window.iniciarRegistro = function(eventoId, categoria, nombreEvento, fechaSesion, diasPreseleccionados) {
+// ---------- Punto de entrada único hacia el modal "Registrarme a Evento" ----------
+// Todas las tarjetas/botones "Registrarme" del chat (categoría, agenda semanal,
+// calendario) llaman esta misma función. Antes arrancaba un flujo conversacional
+// paso a paso; ahora abre el modal directo en el formulario de ESE evento, ya con
+// la fecha (si venía de la agenda/calendario) o el selector de fechas del mes
+// (si es recurrente y no se especificó una sesión puntual).
+window.iniciarRegistro = function(eventoId, categoria, nombreEvento, fechaSesion) {
   const evento = buscarEventoPorId(eventoId, categoria);
-  const recurrente = evento ? esRecurrente(evento) : false;
+  if (!evento) { addMessage("⚠️ No encontré ese evento.", "bot"); return; }
 
-  // Si ya sabemos la sesión exacta (o no es recurrente), podemos validar cupo de una vez.
-  if (evento && (fechaSesion || !recurrente)) {
+  if (fechaSesion || !esRecurrente(evento)) {
     const info = cupoInfo(evento, fechaSesion || evento.fecha);
     if (info.lleno) {
       addMessage(`🔴 Lo siento, *${nombreEvento}* ya alcanzó su cupo máximo para esa fecha (${info.confirmados}/${info.total}). No hay lugares disponibles por el momento.`, "bot");
@@ -691,34 +670,7 @@ window.iniciarRegistro = function(eventoId, categoria, nombreEvento, fechaSesion
     }
   }
 
-  // Si ya tenemos depto Y nombre de un registro anterior en esta misma sesión del
-  // navegador, ofrecemos un atajo de un clic — sin forzar, por si es otra persona
-  // del mismo depto la que se quiere registrar esta vez.
-  if (deptoRecordado && nombreRecordado) {
-    const nombreEventoEsc = escapeHtml(nombreEvento).replace(/'/g, "\\'");
-    const fechaArg = fechaSesion || "";
-    const diasCsv = (diasPreseleccionados && diasPreseleccionados.length) ? diasPreseleccionados.join(",") : "";
-    addMessage(`Vamos a registrarte en *${nombreEvento}*.\n\n¿Uso los mismos datos de tu último registro? Depto *${deptoRecordado}*, nombre *${nombreRecordado}*.`, "bot");
-    const botones = `<button onclick="window.usarDatosRecordados('${eventoId}','${categoria}','${nombreEventoEsc}','${fechaArg}','${diasCsv}')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">✅ Sí, usar estos datos</button><button onclick="window.cambiarDatosRegistro('${eventoId}','${categoria}','${nombreEventoEsc}','${fechaArg}','${diasCsv}')" class="inline-block text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg px-3 py-1.5 transition">✏️ Usar otros datos</button>`;
-    addMessage(botones, "bot");
-    return;
-  }
-
-  registroEnCurso = {
-    eventoId, categoria, nombreEvento,
-    fechaSesion: fechaSesion || null,
-    esRecurrente: recurrente,
-    diasPreseleccionados: diasPreseleccionados || null,
-    paso: deptoRecordado ? "nombre" : "depto",
-    depto: deptoRecordado || undefined
-  };
-
-  if (deptoRecordado) {
-    addMessage(`Vamos a registrarte en *${nombreEvento}* (depto ${deptoRecordado}, el mismo de antes).\n\nIndica el nombre completo de quien asistirá, o escribe *cambiar depto* si no es el correcto.`, "bot");
-  } else {
-    addMessage(`Vamos a registrarte en *${nombreEvento}*.\n\nPor favor indica tu número de departamento (ej. 3801 o 605). Escribe *cancelar* en cualquier momento para salir de este registro.`, "bot");
-  }
-  if (chatInput) chatInput.focus();
+  abrirFormularioEvento(evento, fechaSesion || null);
 };
 
 window.usarDatosRecordados = async function(eventoId, categoria, nombreEvento, fechaSesion, diasCsv) {
@@ -1179,11 +1131,11 @@ function tipSiguientePaso() {
 // registros y cancelar. Se usan en el mensaje de bienvenida, en "ayuda" y como pie
 // de casi todas las respuestas informativas (tipSiguientePaso).
 function mensajeBotonesBienvenida() {
-  return `<button onclick="window.handleQuickAction('Ver eventos de hoy')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">🎈 Eventos de hoy</button>`
+  return `<button onclick="window.abrirModalEventoRegistro('menu')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-brand-700 hover:bg-brand-800 rounded-lg px-3 py-1.5 transition">🎟️ Registrarme a Evento</button>`
+    + `<button onclick="window.handleQuickAction('Ver eventos de hoy')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">🎈 Eventos de hoy</button>`
     + `<button onclick="window.handleQuickAction('Ver eventos de la semana')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg px-3 py-1.5 transition">📅 Eventos de la Semana</button>`
     + `<button onclick="window.abrirModalCalendario()" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg px-3 py-1.5 transition">📆 Calendario Mensual</button>`
-    + `<button onclick="window.handleQuickAction('Mis registros')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-violet-600 hover:bg-violet-700 rounded-lg px-3 py-1.5 transition">📋 Mis registros</button>`
-    + `<button onclick="window.handleQuickAction('Cancelar mi registro')" class="mb-1.5 inline-block text-[11px] font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg px-3 py-1.5 transition">🗑️ Cancelar un registro</button>`;
+    + `<button onclick="window.abrirModalEventoRegistro('verificar_identidad')" class="mb-1.5 inline-block text-[11px] font-bold text-white bg-violet-600 hover:bg-violet-700 rounded-lg px-3 py-1.5 transition">📋 Consultar mis registros o realizar cancelación</button>`;
 }
 
 // Registros del último "mis registros" agrupados por evento, guardados en memoria
@@ -1358,7 +1310,7 @@ function responderMensajeLocal(textoOriginal) {
   if (categoriaDetectada) return respuestaPorCategoria(categoriaDetectada);
 
   if (normalizado.includes("ayuda") || normalizado === "hola") {
-    return `👋 ¡Hola! Esto es lo que puedo hacer por ti:\n\n🎈 *"Eventos de hoy"* — qué hay programado hoy\n📅 *"Eventos de la Semana"* — agenda completa de lunes a domingo\n🔍 El *nombre de un evento* (ej. "días y horario de Zumba") — para ver cupo, fecha y horario\n✅ *"Quiero registrarme en [evento]"* o usa el botón *Registrarme* de cualquier tarjeta\n📋 *"Mis registros"* — ver a qué estás inscrito\n🗑️ *"Cancelar mi registro"* — dar de baja una inscripción\n\n📂 También puedes explorar el menú de la izquierda por categoría para ver el detalle completo de cualquier evento.\n\n¿Con cuál empezamos?` + "\n\n" + mensajeBotonesBienvenida();
+    return `👋 ¡Hola! Esto es lo que puedo hacer por ti:\n\n🎟️ *Registrarme a Evento* — botón de abajo, para registrarte, consultar o cancelar tus registros\n🎈 *"Eventos de hoy"* — qué hay programado hoy\n📅 *"Eventos de la Semana"* — agenda completa de lunes a domingo\n🔍 El *nombre de un evento* (ej. "días y horario de Zumba") — para ver cupo, fecha y horario\n\n📂 También puedes explorar el menú de la izquierda por categoría para ver el detalle completo de cualquier evento.\n\n¿Con cuál empezamos?` + "\n\n" + mensajeBotonesBienvenida();
   }
 
   return null; // sin match local (o mención del evento sin intención operativa) -> se consulta a la IA
@@ -1383,12 +1335,9 @@ async function procesarMensajeUsuario(txt) {
     addMessage("Listo, olvidé el depto guardado. La próxima vez que lo necesite te lo voy a preguntar de nuevo.", "bot");
     return;
   }
-  if (detectarIntentCancelarPropio(txt)) {
-    iniciarConsultaPropia("cancelar", extraerNombreEventoDeTexto(txt));
-    return;
-  }
-  if (detectarIntentConsultarPropio(txt)) {
-    iniciarConsultaPropia("consultar", extraerNombreEventoDeTexto(txt));
+  if (detectarIntentCancelarPropio(txt) || detectarIntentConsultarPropio(txt)) {
+    addMessage("Para eso usa el menú *Consultar mis registros o realizar cancelación* — así verificamos que eres tú antes de mostrar o modificar cualquier registro:", "bot");
+    window.abrirModalEventoRegistro("verificar_identidad");
     return;
   }
 
@@ -1411,7 +1360,7 @@ async function procesarMensajeUsuario(txt) {
     return;
   }
 
-  const respuestaSinMatch = `🤔 No pude generarte una respuesta para eso ahora mismo. Puedo ayudarte con:\n\n🎈 *"Eventos de hoy"* — qué hay programado hoy\n📅 *"Eventos de la Semana"* — agenda completa\n🔍 El *nombre de un evento* (ej. "días y horario de Zumba")\n✅ *"Quiero registrarme en [evento]"*\n📋 *"Mis registros"*\n🗑️ *"Cancelar mi registro"*\n\n📂 También puedes usar el menú de la izquierda por categoría.\n\n¿Qué te gustaría hacer?` + "\n\n" + mensajeBotonesBienvenida();
+  const respuestaSinMatch = `🤔 No pude generarte una respuesta para eso ahora mismo. Puedo ayudarte con:\n\n🎟️ *Registrarme a Evento* — para registrarte, consultar o cancelar\n🎈 *"Eventos de hoy"* — qué hay programado hoy\n📅 *"Eventos de la Semana"* — agenda completa\n🔍 El *nombre de un evento* (ej. "días y horario de Zumba")\n\n📂 También puedes usar el menú de la izquierda por categoría.\n\n¿Qué te gustaría hacer?` + "\n\n" + mensajeBotonesBienvenida();
   addMessage(respuestaSinMatch, "bot");
 }
 
@@ -2066,6 +2015,695 @@ window.irMesActualCalendario = function() {
   calendarioState = { year: hoy.getFullYear(), month: hoy.getMonth() };
   renderCalendario(calendarioState.year, calendarioState.month);
 };
+
+// =====================================================================
+// MODAL "Registrarme a Evento" — flujo completo por menús. Reemplaza el
+// registro/consulta/cancelación que antes vivían en el chat como conversación
+// paso a paso. El chat con IA (Gemini/OpenRouter) para preguntas abiertas y las
+// respuestas informativas (hoy/semana/categoría) NO se tocan.
+// =====================================================================
+
+function estadoInicialRegModal() {
+  return {
+    paso: "menu",
+    categoria: null,
+    evento: null,
+    fechaUnica: null,
+    fechasDisponiblesMes: [],
+    fechasSeleccionadas: [],
+    depto: "",
+    nombreAsistente: "",
+    tieneAcompanantes: false,
+    numAcompanantes: 0,
+    nombresAcompanantes: "",
+    fotoBase64: null,
+    fotoMime: null,
+    fotoNombre: null,
+    aceptaTerminos: false,
+    mostrandoConfirmacion: false,
+    errorFormulario: null,
+    huellasInfo: null,
+    enviando: false,
+    resultadoData: null,
+    deptoConsulta: "",
+    nombreConsulta: "",
+    registros: [],
+    registroSeleccionado: null,
+    errorVerificacion: null,
+    buscando: false,
+    nuevoNumAcomp: 0,
+    nuevosNombresAcomp: ""
+  };
+}
+
+let regModal = estadoInicialRegModal();
+
+window.abrirModalEventoRegistro = function(pasoInicial) {
+  const depto = regModal ? regModal.deptoConsulta : "";
+  const nombre = regModal ? regModal.nombreConsulta : "";
+  regModal = estadoInicialRegModal();
+  if (pasoInicial) regModal.paso = pasoInicial;
+  if (pasoInicial === "verificar_identidad") {
+    regModal.deptoConsulta = depto || deptoRecordado || "";
+    regModal.nombreConsulta = nombre || nombreRecordado || "";
+  }
+  const modal = document.getElementById("modalEventoRegistro");
+  if (modal) modal.classList.remove("hidden");
+  renderModalEventoRegistro();
+};
+
+window.cerrarModalEventoRegistro = function() {
+  const modal = document.getElementById("modalEventoRegistro");
+  if (modal) modal.classList.add("hidden");
+};
+
+function abrirFormularioEvento(evento, fechaUnica) {
+  regModal = estadoInicialRegModal();
+  regModal.categoria = evento.categoria;
+  regModal.evento = evento;
+  regModal.paso = "formulario";
+  if (fechaUnica) {
+    regModal.fechaUnica = fechaUnica;
+  } else if (esRecurrente(evento)) {
+    regModal.fechasDisponiblesMes = ocurrenciasDelMesActual(evento).map(f => fechaISO(f));
+  }
+  if (deptoRecordado) regModal.depto = deptoRecordado;
+  if (nombreRecordado) regModal.nombreAsistente = nombreRecordado;
+
+  const modal = document.getElementById("modalEventoRegistro");
+  if (modal) modal.classList.remove("hidden");
+  renderModalEventoRegistro();
+}
+
+function seleccionarEventoDesdeLista(evento) {
+  regModal.evento = evento;
+  regModal.fechaUnica = null;
+  regModal.fechasDisponiblesMes = esRecurrente(evento) ? ocurrenciasDelMesActual(evento).map(f => fechaISO(f)) : [];
+  regModal.fechasSeleccionadas = [];
+  if (deptoRecordado && !regModal.depto) regModal.depto = deptoRecordado;
+  if (nombreRecordado && !regModal.nombreAsistente) regModal.nombreAsistente = nombreRecordado;
+  regModal.paso = "formulario";
+  renderModalEventoRegistro();
+}
+
+function infoEventoParaListaModal(evento) {
+  if (!esRecurrente(evento)) {
+    const info = cupoInfo(evento, evento.fecha);
+    return { lleno: info.lleno, texto: info.texto, fechaTexto: formatearFecha(parseFechaLocal(evento.fecha)) };
+  }
+  const ocurrencias = ocurrenciasDelMesActual(evento);
+  if (!ocurrencias.length) return { lleno: true, texto: "Sin sesiones este mes", fechaTexto: "Recurrente" };
+  const todasLlenas = ocurrencias.every(f => cupoInfo(evento, fechaISO(f)).lleno);
+  return { lleno: todasLlenas, texto: todasLlenas ? "Cupo Lleno" : `${ocurrencias.length} sesión(es) este mes`, fechaTexto: "Recurrente" };
+}
+
+function leerArchivoComoBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderModalEventoRegistro() {
+  const body = document.getElementById("regBody");
+  if (!body || !regModal) return;
+
+  // ---- Menú principal ----
+  if (regModal.paso === "menu") {
+    body.innerHTML = `
+      <div class="space-y-2">
+        <button id="regBtnNuevo" class="w-full bg-brand-600 hover:bg-brand-700 text-white text-sm font-bold rounded-lg py-3 transition">✅ Registrarme a un evento nuevo</button>
+        <button id="regBtnConsultar" class="w-full bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold rounded-lg py-3 transition">📋 Consultar mis registros o realizar cancelación</button>
+      </div>
+    `;
+    document.getElementById("regBtnNuevo").addEventListener("click", () => { regModal.paso = "categorias"; renderModalEventoRegistro(); });
+    document.getElementById("regBtnConsultar").addEventListener("click", () => { regModal.paso = "verificar_identidad"; renderModalEventoRegistro(); });
+    return;
+  }
+
+  // ---- Categorías ----
+  if (regModal.paso === "categorias") {
+    body.innerHTML = `
+      <p class="text-sm text-slate-600 mb-3">¿A qué tipo de evento te quieres registrar?</p>
+      <div class="space-y-2">
+        ${Object.keys(CATEGORIAS).map(c => `<button class="reg-cat-btn w-full text-left bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg px-3 py-2.5 transition" data-cat="${c}">${CATEGORIAS[c].emoji} ${CATEGORIAS[c].labelSidebar}</button>`).join("")}
+      </div>
+      <button id="regBtnVolverMenu" class="w-full mt-3 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-lg py-2 transition">← Volver</button>
+    `;
+    document.querySelectorAll(".reg-cat-btn").forEach(btn => {
+      btn.addEventListener("click", () => { regModal.categoria = btn.getAttribute("data-cat"); regModal.paso = "lista_eventos"; renderModalEventoRegistro(); });
+    });
+    document.getElementById("regBtnVolverMenu").addEventListener("click", () => { regModal.paso = "menu"; renderModalEventoRegistro(); });
+    return;
+  }
+
+  // ---- Lista de eventos del mes por categoría (costo/gratis, cupo/lleno) ----
+  if (regModal.paso === "lista_eventos") {
+    const cfg = CATEGORIAS[regModal.categoria];
+    const eventos = (DATA[regModal.categoria] || []).filter(e => e.estado.toLowerCase() === "activo")
+      .sort((a, b) => parseFechaLocal(a.fecha) - parseFechaLocal(b.fecha));
+    body.innerHTML = `
+      <p class="text-xs font-bold text-slate-500 mb-2">${cfg.emoji} ${cfg.labelSidebar} · eventos activos</p>
+      <div class="space-y-2 max-h-[55vh] overflow-y-auto pr-1" id="regListaEventos"></div>
+      <button id="regBtnVolverCat" class="w-full mt-3 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-lg py-2 transition">← Volver</button>
+    `;
+    const cont = document.getElementById("regListaEventos");
+    if (!eventos.length) {
+      cont.innerHTML = `<p class="text-xs text-slate-400">No hay eventos activos en esta categoría por ahora.</p>`;
+    } else {
+      eventos.forEach(ev => {
+        const info = infoEventoParaListaModal(ev);
+        const costoTag = ev.tienecosto ? `<span class="text-amber-600 font-bold">💰 Con costo</span>` : `<span class="text-emerald-600 font-bold">🆓 Gratis</span>`;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.disabled = info.lleno;
+        btn.className = `w-full text-left border rounded-lg px-3 py-2.5 transition ${info.lleno ? "bg-slate-50 border-slate-100 opacity-50 cursor-not-allowed" : "bg-white border-slate-200 hover:border-brand-300 hover:bg-brand-50"}`;
+        btn.innerHTML = `
+          <p class="text-sm font-bold text-slate-800">${esRecurrente(ev) ? "🔁 " : ""}${escapeHtml(ev.nombre)}</p>
+          <p class="text-[11px] text-slate-500">${info.fechaTexto} · ${horarioTexto(ev)} · ${escapeHtml(ev.ubicacion || "N/A")}</p>
+          <p class="text-[11px] font-bold mt-0.5 flex items-center gap-2">${costoTag} <span class="${info.lleno ? "text-red-500" : "text-emerald-600"}">${info.lleno ? "🔴" : "🟢"} ${info.texto}</span></p>
+        `;
+        if (!info.lleno) btn.addEventListener("click", () => seleccionarEventoDesdeLista(ev));
+        cont.appendChild(btn);
+      });
+    }
+    document.getElementById("regBtnVolverCat").addEventListener("click", () => { regModal.paso = "categorias"; renderModalEventoRegistro(); });
+    return;
+  }
+
+  // ---- Formulario de registro ----
+  if (regModal.paso === "formulario") { renderFormularioEvento(); return; }
+
+  // ---- Resultado del registro ----
+  if (regModal.paso === "resultado_ok") {
+    const data = regModal.resultadoData || {};
+    let detalleHtml;
+    if (data.multiSesion) {
+      const confirmadas = (data.detalle || []).filter(d => d.ok);
+      const fallidas = (data.detalle || []).filter(d => !d.ok);
+      detalleHtml = `<p class="text-xs text-slate-600 mb-2">Se confirmaron ${confirmadas.length} de ${data.totalSolicitadas} sesión(es) solicitadas.</p>`;
+      if (fallidas.length) detalleHtml += `<p class="text-xs text-red-600 mb-2">⚠️ No se pudieron confirmar ${fallidas.length} sesión(es) (cupo o huellas agotadas).</p>`;
+    } else {
+      detalleHtml = `<p class="text-xs text-slate-600 mb-2">${escapeHtml(data.mensaje || "")}</p>`;
+    }
+    body.innerHTML = `
+      <p class="text-sm font-bold text-emerald-700 mb-2">✅ ¡Registro confirmado!</p>
+      ${detalleHtml}
+      <div class="space-y-2 mt-3">
+        <button id="regBtnOtroEvento" class="w-full bg-brand-600 hover:bg-brand-700 text-white text-sm font-bold rounded-lg py-2.5 transition">Registrarme a otro evento</button>
+        <button id="regBtnVerMisRegistros" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg py-2.5 transition">Ver mis registros</button>
+        <button id="regBtnCerrar" class="w-full bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-lg py-2 transition">Cerrar</button>
+      </div>
+    `;
+    document.getElementById("regBtnOtroEvento").addEventListener("click", () => { regModal.paso = "categorias"; renderModalEventoRegistro(); });
+    document.getElementById("regBtnVerMisRegistros").addEventListener("click", () => { regModal.paso = "verificar_identidad"; renderModalEventoRegistro(); });
+    document.getElementById("regBtnCerrar").addEventListener("click", window.cerrarModalEventoRegistro);
+    return;
+  }
+
+  // ---- Verificación de identidad (depto + nombre) ----
+  if (regModal.paso === "verificar_identidad") {
+    body.innerHTML = `
+      <p class="text-sm text-slate-600 mb-3">Para ver o modificar tus registros, confírmanos con quién te registraste (así evitamos que alguien más los consulte o cancele):</p>
+      <div class="space-y-2.5">
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1">Número de departamento</label>
+          <input id="verDepto" type="text" inputmode="numeric" placeholder="Ej. 3801 o 605" value="${escapeHtml(regModal.deptoConsulta || "")}" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1">Nombre con el que te registraste</label>
+          <input id="verNombre" type="text" value="${escapeHtml(regModal.nombreConsulta || "")}" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+        </div>
+      </div>
+      ${regModal.errorVerificacion ? `<p class="text-xs font-bold text-red-600 mt-2">⚠️ ${escapeHtml(regModal.errorVerificacion)}</p>` : ""}
+      <div class="flex gap-2 mt-3">
+        <button id="regBtnVolverMenu2" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg py-2.5 transition">← Volver</button>
+        <button id="regBtnBuscarRegistros" class="flex-1 bg-brand-600 hover:bg-brand-700 text-white text-sm font-bold rounded-lg py-2.5 transition">${regModal.buscando ? "Buscando…" : "Buscar mis registros"}</button>
+      </div>
+    `;
+    document.getElementById("verDepto").addEventListener("input", (e) => regModal.deptoConsulta = e.target.value.trim());
+    document.getElementById("verNombre").addEventListener("input", (e) => regModal.nombreConsulta = e.target.value);
+    document.getElementById("regBtnVolverMenu2").addEventListener("click", () => { regModal.paso = "menu"; renderModalEventoRegistro(); });
+    const btnBuscar = document.getElementById("regBtnBuscarRegistros");
+    btnBuscar.disabled = regModal.buscando;
+    btnBuscar.addEventListener("click", buscarMisRegistrosModal);
+    return;
+  }
+
+  // ---- Lista de mis registros verificados ----
+  if (regModal.paso === "lista_registros") {
+    const registros = regModal.registros || [];
+    body.innerHTML = `
+      <p class="text-xs text-slate-500 mb-2">Depto ${escapeHtml(regModal.deptoConsulta)} · ${escapeHtml(regModal.nombreConsulta)}</p>
+      <div class="space-y-2 max-h-[50vh] overflow-y-auto pr-1" id="regListaRegistros"></div>
+      <button id="regBtnVolverMenu3" class="w-full mt-3 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-lg py-2 transition">← Volver</button>
+    `;
+    const cont = document.getElementById("regListaRegistros");
+    if (!registros.length) {
+      cont.innerHTML = `<p class="text-xs text-slate-400">No se encontraron registros futuros con esos datos.</p>`;
+    } else {
+      registros.forEach(r => {
+        const cfg = CATEGORIAS[r.categoria];
+        const fechaDate = parseFechaLocal(r.fechaSesion);
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-3 py-2.5 transition";
+        btn.innerHTML = `
+          <p class="text-sm font-bold text-slate-800">${cfg ? cfg.emoji : "📌"} ${escapeHtml(r.nombreEvento)}</p>
+          <p class="text-[11px] text-slate-500">${formatearFecha(fechaDate)}${r.numAcompanantes > 0 ? ` · 👥 +${r.numAcompanantes} acompañante(s)` : ""}</p>
+        `;
+        btn.addEventListener("click", () => { regModal.registroSeleccionado = r; regModal.errorFormulario = null; regModal.paso = "detalle_registro"; renderModalEventoRegistro(); });
+        cont.appendChild(btn);
+      });
+    }
+    document.getElementById("regBtnVolverMenu3").addEventListener("click", () => { regModal.paso = "menu"; renderModalEventoRegistro(); });
+    return;
+  }
+
+  // ---- Detalle de un registro ----
+  if (regModal.paso === "detalle_registro") {
+    const r = regModal.registroSeleccionado;
+    const cfg = CATEGORIAS[r.categoria];
+    const fechaDate = parseFechaLocal(r.fechaSesion);
+    body.innerHTML = `
+      <div class="bg-slate-50 border border-slate-100 rounded-lg p-3 mb-3 text-xs text-slate-700 space-y-1">
+        <p class="text-sm font-bold text-slate-800">${cfg ? cfg.emoji : "📌"} ${escapeHtml(r.nombreEvento)}</p>
+        <p><strong>Fecha:</strong> ${formatearFecha(fechaDate)}</p>
+        <p><strong>Asistente:</strong> ${escapeHtml(r.nombre)}</p>
+        <p><strong>Acompañantes:</strong> ${r.numAcompanantes || 0}${r.nombresAcompanantes ? " — " + escapeHtml(r.nombresAcompanantes) : ""}</p>
+        ${r.comprobantePago ? `<p><a href="${r.comprobantePago}" target="_blank" rel="noopener" class="text-brand-600 underline font-bold">Ver comprobante subido</a></p>` : ""}
+      </div>
+      <div class="space-y-2">
+        <button id="regBtnEditarAcomp" class="w-full bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold rounded-lg py-2.5 transition">✏️ Modificar acompañantes</button>
+        <button id="regBtnCancelarRegistro" class="w-full bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-lg py-2.5 transition">🗑️ Cancelar este registro</button>
+        <button id="regBtnVolverLista2" class="w-full bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-lg py-2 transition">← Volver a mis registros</button>
+      </div>
+    `;
+    document.getElementById("regBtnEditarAcomp").addEventListener("click", () => {
+      regModal.nuevoNumAcomp = r.numAcompanantes || 0;
+      regModal.nuevosNombresAcomp = r.nombresAcompanantes || "";
+      regModal.errorFormulario = null;
+      regModal.paso = "editar_acompanantes";
+      renderModalEventoRegistro();
+    });
+    document.getElementById("regBtnCancelarRegistro").addEventListener("click", () => { regModal.paso = "confirmar_cancelacion"; renderModalEventoRegistro(); });
+    document.getElementById("regBtnVolverLista2").addEventListener("click", () => { regModal.paso = "lista_registros"; renderModalEventoRegistro(); });
+    return;
+  }
+
+  // ---- Editar acompañantes ----
+  if (regModal.paso === "editar_acompanantes") {
+    const r = regModal.registroSeleccionado;
+    body.innerHTML = `
+      <p class="text-sm font-bold text-slate-800 mb-2">Modificar acompañantes — ${escapeHtml(r.nombreEvento)}</p>
+      <div class="space-y-2.5">
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1">Número de acompañantes</label>
+          <input id="editNumAcomp" type="number" min="0" value="${regModal.nuevoNumAcomp}" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          <p class="text-[10px] text-slate-400 mt-1">Máximo total permitido para tu depto en esta sesión: ${r.huellasMaxDepto} persona(s), incluyéndote a ti.</p>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1">Nombres de los acompañantes</label>
+          <textarea id="editNombresAcomp" rows="2" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">${escapeHtml(regModal.nuevosNombresAcomp)}</textarea>
+        </div>
+      </div>
+      ${regModal.errorFormulario ? `<p class="text-xs font-bold text-red-600 mt-2">⚠️ ${escapeHtml(regModal.errorFormulario)}</p>` : ""}
+      <div class="flex gap-2 mt-3">
+        <button id="regBtnVolverDetalle" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg py-2.5 transition">← Volver</button>
+        <button id="regBtnGuardarAcomp" class="flex-1 bg-brand-600 hover:bg-brand-700 text-white text-sm font-bold rounded-lg py-2.5 transition">Guardar cambios</button>
+      </div>
+    `;
+    document.getElementById("editNumAcomp").addEventListener("input", (e) => regModal.nuevoNumAcomp = Math.max(0, parseInt(e.target.value, 10) || 0));
+    document.getElementById("editNombresAcomp").addEventListener("input", (e) => regModal.nuevosNombresAcomp = e.target.value);
+    document.getElementById("regBtnVolverDetalle").addEventListener("click", () => { regModal.paso = "detalle_registro"; renderModalEventoRegistro(); });
+    document.getElementById("regBtnGuardarAcomp").addEventListener("click", () => { regModal.errorFormulario = null; regModal.paso = "confirmar_edicion"; renderModalEventoRegistro(); });
+    return;
+  }
+
+  // ---- Confirmar edición de acompañantes ----
+  if (regModal.paso === "confirmar_edicion") {
+    const r = regModal.registroSeleccionado;
+    body.innerHTML = `
+      <p class="text-sm text-slate-700 mb-3">¿Confirmas actualizar tu registro de <strong>${escapeHtml(r.nombreEvento)}</strong> a ${regModal.nuevoNumAcomp} acompañante(s)?</p>
+      ${regModal.errorFormulario ? `<p class="text-xs font-bold text-red-600 mb-2">⚠️ ${escapeHtml(regModal.errorFormulario)}</p>` : ""}
+      <div class="flex gap-2">
+        <button id="regBtnCancelarEdicion" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg py-2.5 transition">← Volver</button>
+        <button id="regBtnConfirmarEdicion" class="flex-1 bg-brand-600 hover:bg-brand-700 text-white text-sm font-bold rounded-lg py-2.5 transition">${regModal.enviando ? "Guardando…" : "✅ Confirmar cambio"}</button>
+      </div>
+    `;
+    document.getElementById("regBtnCancelarEdicion").addEventListener("click", () => { regModal.paso = "editar_acompanantes"; renderModalEventoRegistro(); });
+    const btn = document.getElementById("regBtnConfirmarEdicion");
+    btn.disabled = regModal.enviando;
+    btn.addEventListener("click", guardarEdicionAcompanantes);
+    return;
+  }
+
+  // ---- Confirmar cancelación ----
+  if (regModal.paso === "confirmar_cancelacion") {
+    const r = regModal.registroSeleccionado;
+    body.innerHTML = `
+      <p class="text-sm font-bold text-red-700 mb-2">⚠️ ¿Confirmas cancelar este registro?</p>
+      <div class="bg-red-50 border border-red-100 rounded-lg p-3 mb-3 text-xs text-slate-700">
+        <p class="font-bold">${escapeHtml(r.nombreEvento)}</p>
+        <p>${formatearFecha(parseFechaLocal(r.fechaSesion))}</p>
+      </div>
+      <p class="text-[11px] text-slate-500 mb-3">El lugar quedará disponible para otro residente de inmediato.</p>
+      ${regModal.errorFormulario ? `<p class="text-xs font-bold text-red-600 mb-2">⚠️ ${escapeHtml(regModal.errorFormulario)}</p>` : ""}
+      <div class="flex gap-2">
+        <button id="regBtnNoCancelar" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg py-2.5 transition">← No, volver</button>
+        <button id="regBtnSiCancelar" class="flex-1 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-lg py-2.5 transition">${regModal.enviando ? "Cancelando…" : "Sí, cancelar"}</button>
+      </div>
+    `;
+    document.getElementById("regBtnNoCancelar").addEventListener("click", () => { regModal.paso = "detalle_registro"; renderModalEventoRegistro(); });
+    const btn = document.getElementById("regBtnSiCancelar");
+    btn.disabled = regModal.enviando;
+    btn.addEventListener("click", confirmarCancelacionModal);
+    return;
+  }
+}
+
+// ---- Formulario de registro a un evento (paso "formulario") ----
+function renderFormularioEvento() {
+  const body = document.getElementById("regBody");
+  if (!body) return;
+  if (regModal.mostrandoConfirmacion) { renderConfirmacionRegistro(); return; }
+
+  const ev = regModal.evento;
+  const cfg = CATEGORIAS[ev.categoria];
+  const recurrenteSinFecha = !regModal.fechaUnica && esRecurrente(ev);
+
+  let fechasHtml = "";
+  if (regModal.fechaUnica) {
+    fechasHtml = `<p class="text-xs text-slate-600 mb-2">📅 Sesión: <strong>${formatearFecha(parseFechaLocal(regModal.fechaUnica))}</strong></p>`;
+  } else if (recurrenteSinFecha) {
+    if (!regModal.fechasDisponiblesMes.length) {
+      fechasHtml = `<p class="text-xs text-red-600 font-bold mb-2">No hay sesiones disponibles este mes para este evento.</p>`;
+    } else {
+      fechasHtml = `<label class="block text-xs font-bold text-slate-500 mb-1">¿A qué fecha(s) te registras este mes?</label><div class="space-y-1 mb-1 max-h-32 overflow-y-auto pr-1">`;
+      regModal.fechasDisponiblesMes.forEach(f => {
+        const info = cupoInfo(ev, f);
+        const fechaDate = parseFechaLocal(f);
+        const etiqueta = `${DIAS_SEMANA_LARGOS[fechaDate.getDay()].slice(0, 3)} ${formatearFecha(fechaDate)}`;
+        fechasHtml += `<label class="flex items-center gap-2 text-xs font-medium ${info.lleno ? "opacity-40" : ""}"><input type="checkbox" class="regFechaChk" value="${f}" ${info.lleno ? "disabled" : ""} ${regModal.fechasSeleccionadas.includes(f) ? "checked" : ""}> ${etiqueta} ${info.lleno ? "· 🔴 lleno" : ""}</label>`;
+      });
+      fechasHtml += `</div><label class="flex items-center gap-2 text-xs font-bold text-brand-700 mb-2"><input type="checkbox" id="regFechaTodas"> Seleccionar todas las disponibles</label>`;
+    }
+  }
+
+  const huellasInfoHtml = regModal.huellasInfo
+    ? `<p class="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5 mb-2">🚫 ${escapeHtml(regModal.huellasInfo.error)}</p>` : "";
+
+  body.innerHTML = `
+    <p class="text-sm font-bold text-slate-800 mb-1">${cfg ? cfg.emoji : ""} ${escapeHtml(ev.nombre)}</p>
+    <p class="text-[11px] text-slate-500 mb-3">${horarioTexto(ev)} · ${escapeHtml(ev.ubicacion || "N/A")} ${ev.tienecosto ? "· 💰 Con costo" : "· 🆓 Gratis"}</p>
+
+    ${fechasHtml}
+
+    ${(deptoRecordado || nombreRecordado) ? `<button id="regBtnUsarDatos" type="button" class="w-full mb-2 text-[11px] font-bold text-brand-700 bg-brand-50 hover:bg-brand-100 rounded-lg py-2 transition">↺ Usar mis datos (depto ${escapeHtml(deptoRecordado || "—")} · ${escapeHtml(nombreRecordado || "—")})</button>` : ""}
+
+    <div class="space-y-2.5">
+      <div>
+        <label class="block text-xs font-bold text-slate-500 mb-1">Número de departamento</label>
+        <input id="regDepto" type="text" inputmode="numeric" placeholder="Ej. 3801 o 605" value="${escapeHtml(regModal.depto)}" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-500 mb-1">Nombre completo de quien asistirá</label>
+        <input id="regNombre" type="text" value="${escapeHtml(regModal.nombreAsistente)}" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+      </div>
+      <div>
+        <label class="flex items-center gap-2 text-xs font-bold text-slate-500 cursor-pointer">
+          <input id="regTieneAcomp" type="checkbox" ${regModal.tieneAcompanantes ? "checked" : ""}> ¿Vienes acompañado?
+        </label>
+      </div>
+      <div id="regWrapperAcomp" class="${regModal.tieneAcompanantes ? "" : "hidden"} space-y-2 pl-2 border-l-2 border-slate-100">
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1">¿Cuántos acompañantes?</label>
+          <input id="regNumAcomp" type="number" min="0" value="${regModal.numAcompanantes || 0}" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1">Nombre(s) de los acompañantes</label>
+          <textarea id="regNombresAcomp" rows="2" placeholder="Separa los nombres con coma" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">${escapeHtml(regModal.nombresAcompanantes)}</textarea>
+        </div>
+      </div>
+      ${huellasInfoHtml}
+      ${ev.tienecosto ? `
+      <div>
+        <label class="block text-xs font-bold text-slate-500 mb-1">Comprobante de pago (foto)</label>
+        <input id="regFoto" type="file" accept="image/*" class="w-full text-xs">
+        ${regModal.fotoBase64 ? `<p class="text-[11px] text-emerald-600 font-bold mt-1">✅ Foto cargada (${escapeHtml(regModal.fotoNombre || "")})</p>` : ""}
+      </div>` : ""}
+      <div>
+        <label class="flex items-start gap-2 text-[11px] text-slate-600 cursor-pointer">
+          <input id="regAcepta" type="checkbox" class="mt-0.5" ${regModal.aceptaTerminos ? "checked" : ""}>
+          <span>Entiendo que al registrarme estoy ocupando un lugar que otra persona podría usar. Si no puedo asistir, cancelaré con tiempo suficiente; de lo contrario el Comité podría restringirme el acceso a nuevos registros.</span>
+        </label>
+      </div>
+    </div>
+
+    ${regModal.errorFormulario ? `<p class="text-xs font-bold text-red-600 mt-2">⚠️ ${escapeHtml(regModal.errorFormulario)}</p>` : ""}
+
+    <div class="flex gap-2 mt-3">
+      <button id="regBtnVolverLista" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg py-2.5 transition">← Volver</button>
+      <button id="regBtnContinuar" class="flex-1 bg-brand-600 hover:bg-brand-700 text-white text-sm font-bold rounded-lg py-2.5 transition">Continuar</button>
+    </div>
+  `;
+
+  document.getElementById("regDepto").addEventListener("input", (e) => regModal.depto = e.target.value.trim());
+  document.getElementById("regNombre").addEventListener("input", (e) => regModal.nombreAsistente = e.target.value);
+  document.getElementById("regTieneAcomp").addEventListener("change", (e) => {
+    regModal.tieneAcompanantes = e.target.checked;
+    if (!e.target.checked) { regModal.numAcompanantes = 0; regModal.nombresAcompanantes = ""; }
+    renderFormularioEvento();
+  });
+  const numAcompInput = document.getElementById("regNumAcomp");
+  if (numAcompInput) numAcompInput.addEventListener("input", (e) => regModal.numAcompanantes = Math.max(0, parseInt(e.target.value, 10) || 0));
+  const nombresAcompInput = document.getElementById("regNombresAcomp");
+  if (nombresAcompInput) nombresAcompInput.addEventListener("input", (e) => regModal.nombresAcompanantes = e.target.value);
+  document.getElementById("regAcepta").addEventListener("change", (e) => regModal.aceptaTerminos = e.target.checked);
+
+  const fotoInput = document.getElementById("regFoto");
+  if (fotoInput) {
+    fotoInput.addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      regModal.fotoBase64 = await leerArchivoComoBase64(file);
+      regModal.fotoMime = file.type;
+      regModal.fotoNombre = file.name;
+      renderFormularioEvento();
+    });
+  }
+
+  const btnUsarDatos = document.getElementById("regBtnUsarDatos");
+  if (btnUsarDatos) btnUsarDatos.addEventListener("click", () => {
+    regModal.depto = deptoRecordado || regModal.depto;
+    regModal.nombreAsistente = nombreRecordado || regModal.nombreAsistente;
+    renderFormularioEvento();
+  });
+
+  document.querySelectorAll(".regFechaChk").forEach(chk => {
+    chk.addEventListener("change", () => {
+      regModal.fechasSeleccionadas = Array.from(document.querySelectorAll(".regFechaChk:checked")).map(c => c.value);
+    });
+  });
+  const chkTodas = document.getElementById("regFechaTodas");
+  if (chkTodas) chkTodas.addEventListener("change", (e) => {
+    document.querySelectorAll(".regFechaChk:not(:disabled)").forEach(c => { c.checked = e.target.checked; });
+    regModal.fechasSeleccionadas = Array.from(document.querySelectorAll(".regFechaChk:checked")).map(c => c.value);
+  });
+
+  document.getElementById("regBtnVolverLista").addEventListener("click", () => {
+    regModal.paso = regModal.categoria ? "lista_eventos" : "menu";
+    renderModalEventoRegistro();
+  });
+
+  document.getElementById("regBtnContinuar").addEventListener("click", () => {
+    regModal.errorFormulario = null;
+    regModal.huellasInfo = null;
+    if (!/^[0-9]{2,5}$/.test(regModal.depto || "")) { regModal.errorFormulario = "Indica un número de depto válido (solo números)."; renderFormularioEvento(); return; }
+    if (!regModal.nombreAsistente || regModal.nombreAsistente.trim().length < 3) { regModal.errorFormulario = "Indica el nombre completo del asistente."; renderFormularioEvento(); return; }
+    if (regModal.tieneAcompanantes && regModal.numAcompanantes > 0 && !regModal.nombresAcompanantes.trim()) { regModal.errorFormulario = "Indica el/los nombre(s) de tus acompañantes."; renderFormularioEvento(); return; }
+    if (recurrenteSinFecha && !regModal.fechasSeleccionadas.length) { regModal.errorFormulario = "Marca al menos una fecha para registrarte."; renderFormularioEvento(); return; }
+    if (ev.tienecosto && !regModal.fotoBase64) { regModal.errorFormulario = "Este evento tiene costo: adjunta tu comprobante de pago."; renderFormularioEvento(); return; }
+    if (!regModal.aceptaTerminos) { regModal.errorFormulario = "Debes aceptar el aviso de responsabilidad para continuar."; renderFormularioEvento(); return; }
+    regModal.mostrandoConfirmacion = true;
+    renderModalEventoRegistro();
+  });
+}
+
+function renderConfirmacionRegistro() {
+  const body = document.getElementById("regBody");
+  if (!body) return;
+  const ev = regModal.evento;
+  const fechas = regModal.fechaUnica ? [regModal.fechaUnica] : regModal.fechasSeleccionadas;
+  const fechasTexto = fechas.map(f => formatearFecha(parseFechaLocal(f))).join(", ");
+
+  body.innerHTML = `
+    <p class="text-sm font-bold text-slate-800 mb-2">Confirma tu registro:</p>
+    <div class="bg-slate-50 border border-slate-100 rounded-lg p-3 mb-3 text-xs text-slate-700 space-y-1">
+      <p><strong>Evento:</strong> ${escapeHtml(ev.nombre)}</p>
+      <p><strong>Fecha(s):</strong> ${fechasTexto}</p>
+      <p><strong>Depto:</strong> ${escapeHtml(regModal.depto)}</p>
+      <p><strong>Asistente:</strong> ${escapeHtml(regModal.nombreAsistente)}</p>
+      ${regModal.numAcompanantes > 0 ? `<p><strong>Acompañantes:</strong> ${regModal.numAcompanantes} — ${escapeHtml(regModal.nombresAcompanantes || "")}</p>` : ""}
+      ${ev.tienecosto ? `<p><strong>Comprobante:</strong> ${regModal.fotoBase64 ? "Adjuntado ✅" : "⚠️ No adjuntado"}</p>` : ""}
+    </div>
+    ${regModal.errorFormulario ? `<p class="text-xs font-bold text-red-600 mb-2">⚠️ ${escapeHtml(regModal.errorFormulario)}</p>` : ""}
+    <div class="flex gap-2">
+      <button id="regBtnVolverEditar" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg py-2.5 transition">← Editar</button>
+      <button id="regBtnConfirmarEnvio" class="flex-1 bg-brand-600 hover:bg-brand-700 text-white text-sm font-bold rounded-lg py-2.5 transition">${regModal.enviando ? "Enviando…" : "✅ Confirmar registro"}</button>
+    </div>
+  `;
+  document.getElementById("regBtnVolverEditar").addEventListener("click", () => { regModal.mostrandoConfirmacion = false; renderModalEventoRegistro(); });
+  const btnConfirmar = document.getElementById("regBtnConfirmarEnvio");
+  btnConfirmar.disabled = regModal.enviando;
+  btnConfirmar.addEventListener("click", enviarRegistroModal);
+}
+
+async function enviarRegistroModal() {
+  const ev = regModal.evento;
+  const fechas = regModal.fechaUnica ? [regModal.fechaUnica] : regModal.fechasSeleccionadas;
+  regModal.enviando = true;
+  regModal.errorFormulario = null;
+  renderConfirmacionRegistro();
+
+  const payload = {
+    accion: "registrar",
+    eventoId: ev.eventoid,
+    categoria: ev.categoria,
+    depto: regModal.depto,
+    nombre: regModal.nombreAsistente,
+    numAcompanantes: regModal.numAcompanantes,
+    nombresAcompanantes: regModal.nombresAcompanantes,
+    aceptaTerminos: regModal.aceptaTerminos ? "1" : "0"
+  };
+  if (fechas.length === 1) payload.fechaSesion = fechas[0];
+  else payload.fechasSesion = fechas.join(",");
+  if (regModal.fotoBase64) {
+    payload.fotoBase64 = regModal.fotoBase64;
+    payload.fotoMime = regModal.fotoMime;
+    payload.fotoNombre = regModal.fotoNombre;
+  }
+
+  try {
+    const res = await fetch(URL_AGENTE_EVENTOS, { method: "POST", body: JSON.stringify(payload) });
+    const data = await res.json();
+    regModal.enviando = false;
+
+    if (data.error && !data.hasOwnProperty("ok")) {
+      regModal.errorFormulario = data.detalle || "Error al procesar el registro.";
+      renderConfirmacionRegistro();
+      return;
+    }
+    if (data.ok || (data.multiSesion && (data.detalle || []).some(d => d.ok))) {
+      deptoRecordado = regModal.depto;
+      nombreRecordado = regModal.nombreAsistente;
+      renderSidebarEventos();
+      refrescarRegistrosYCupos();
+      regModal.resultadoData = data;
+      regModal.paso = "resultado_ok";
+      renderModalEventoRegistro();
+      return;
+    }
+    regModal.errorFormulario = data.error || "No se pudo completar el registro.";
+    regModal.huellasInfo = data.huellasAgotadas ? data : null;
+    if (regModal.huellasInfo) {
+      // Vuelve al formulario (no a la confirmación) para que pueda ajustar el
+      // número de acompañantes con el máximo permitido ya visible.
+      regModal.mostrandoConfirmacion = false;
+      renderModalEventoRegistro();
+    } else {
+      renderConfirmacionRegistro();
+    }
+  } catch (e) {
+    regModal.enviando = false;
+    regModal.errorFormulario = "Error de conexión. Intenta de nuevo.";
+    renderConfirmacionRegistro();
+  }
+}
+
+async function buscarMisRegistrosModal() {
+  regModal.errorVerificacion = null;
+  if (!/^[0-9]{2,5}$/.test(regModal.deptoConsulta || "")) { regModal.errorVerificacion = "Indica un número de depto válido."; renderModalEventoRegistro(); return; }
+  if (!regModal.nombreConsulta || regModal.nombreConsulta.trim().length < 3) { regModal.errorVerificacion = "Indica el nombre completo con el que te registraste."; renderModalEventoRegistro(); return; }
+  regModal.buscando = true;
+  renderModalEventoRegistro();
+  try {
+    const res = await fetch(URL_AGENTE_EVENTOS, { method: "POST", body: JSON.stringify({ accion: "mis_registros", depto: regModal.deptoConsulta, nombre: regModal.nombreConsulta }) });
+    const data = await res.json();
+    regModal.buscando = false;
+    if (!data.ok) { regModal.errorVerificacion = data.error || "No se pudo verificar tus datos."; renderModalEventoRegistro(); return; }
+    regModal.registros = data.registros || [];
+    deptoRecordado = regModal.deptoConsulta;
+    nombreRecordado = regModal.nombreConsulta;
+    regModal.paso = "lista_registros";
+    renderModalEventoRegistro();
+  } catch (e) {
+    regModal.buscando = false;
+    regModal.errorVerificacion = "Error de conexión. Intenta de nuevo.";
+    renderModalEventoRegistro();
+  }
+}
+
+async function guardarEdicionAcompanantes() {
+  const r = regModal.registroSeleccionado;
+  regModal.enviando = true;
+  regModal.errorFormulario = null;
+  renderModalEventoRegistro();
+  try {
+    const res = await fetch(URL_AGENTE_EVENTOS, {
+      method: "POST",
+      body: JSON.stringify({
+        accion: "modificar_registro",
+        registroId: r.registroId,
+        depto: regModal.deptoConsulta,
+        nombre: regModal.nombreConsulta,
+        numAcompanantes: regModal.nuevoNumAcomp,
+        nombresAcompanantes: regModal.nuevosNombresAcomp
+      })
+    });
+    const data = await res.json();
+    regModal.enviando = false;
+    if (!data.ok) { regModal.errorFormulario = data.error || "No se pudo actualizar tu registro."; regModal.paso = "confirmar_edicion"; renderModalEventoRegistro(); return; }
+    r.numAcompanantes = regModal.nuevoNumAcomp;
+    r.nombresAcompanantes = regModal.nuevosNombresAcomp;
+    renderSidebarEventos();
+    refrescarRegistrosYCupos();
+    regModal.paso = "detalle_registro";
+    renderModalEventoRegistro();
+  } catch (e) {
+    regModal.enviando = false;
+    regModal.errorFormulario = "Error de conexión al guardar los cambios.";
+    regModal.paso = "confirmar_edicion";
+    renderModalEventoRegistro();
+  }
+}
+
+async function confirmarCancelacionModal() {
+  const r = regModal.registroSeleccionado;
+  regModal.enviando = true;
+  regModal.errorFormulario = null;
+  renderModalEventoRegistro();
+  try {
+    const res = await fetch(URL_AGENTE_EVENTOS, {
+      method: "POST",
+      body: JSON.stringify({ accion: "cancelar_mi_registro", depto: regModal.deptoConsulta, nombre: regModal.nombreConsulta, registroIds: r.registroId })
+    });
+    const data = await res.json();
+    regModal.enviando = false;
+    if (!data.ok || !data.totalCanceladas) { regModal.errorFormulario = data.error || "No se pudo cancelar el registro."; renderModalEventoRegistro(); return; }
+    regModal.registros = (regModal.registros || []).filter(x => x.registroId !== r.registroId);
+    renderSidebarEventos();
+    refrescarRegistrosYCupos();
+    regModal.paso = "lista_registros";
+    renderModalEventoRegistro();
+  } catch (e) {
+    regModal.enviando = false;
+    regModal.errorFormulario = "Error de conexión al cancelar.";
+    renderModalEventoRegistro();
+  }
+}
 
 inicializar();
 setInterval(inicializar, 60000); // refresca eventos completos cada 60s
