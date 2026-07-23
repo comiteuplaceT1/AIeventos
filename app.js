@@ -14,7 +14,7 @@ const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7
 
 // ⚠️ COPIA AQUÍ EL LINK DE IMPLEMENTACIÓN DE TU GOOGLE APPS SCRIPT (APLICACIÓN WEB /EXEC)
 // Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con Gemini.
-const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbxbAENz2lkjUoxrWiX8I8dfFkUA5WpWL5vyaI2aaImqwIjqdZz68WjdGPc2W2WmMOWK/exec";
+const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbx-7aUlJP8S2FoSZ1b4TljZIaEpWdKT_tJoFhXFm0mVce45lt83m7znwhiahPk3DNB2/exec";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -381,52 +381,122 @@ function normalizarEventos(lista, categoria) {
     diasemana: String(ev["diassemana"] || "").split(",").map(d => d.trim()).filter(d => d),
     fechafin: ev["fechafin"] || "",
     detalledias: ev["detalledias"] || "",
+    recurrencia: (ev["recurrencia"] || "").toLowerCase().trim(),
+    recurrenciadetalle: ev["recurrenciadetalle"] || "",
     categoria
   })).filter(ev => ev.eventoid && ev.fecha);
 }
 
 // ---------- Recurrencia semanal (clases tipo Zumba Lun/Mié/Sáb) ----------
+// "Recurrente" ahora incluye 4 tipos: semanal (días de la semana, el original),
+// quincenal (cada 14 días), mensual (mismo día de mes) y mensual_nth (ej. tercer
+// domingo de cada mes). El campo evento.recurrencia manda; si viene vacío pero
+// hay DiasSemana marcados, se asume "semanal" por compatibilidad con eventos
+// creados antes de que existiera este campo.
+function tipoRecurrencia(evento) {
+  if (evento.recurrencia) return evento.recurrencia;
+  if (evento.diasemana && evento.diasemana.length > 0) return "semanal";
+  return "";
+}
+
 function esRecurrente(evento) {
-  return evento.diasemana && evento.diasemana.length > 0;
+  const tipo = tipoRecurrencia(evento);
+  return tipo === "semanal" || tipo === "quincenal" || tipo === "mensual" || tipo === "mensual_nth";
 }
 
 // ¿El evento tiene una sesión programada en esta fecha exacta?
 function esOcurrenciaEnFecha(evento, fechaDate) {
-  if (!esRecurrente(evento)) {
-    return evento.fecha === fechaISO(fechaDate);
+  return generarOcurrenciasEnRango(evento, fechaDate, fechaDate).length > 0;
+}
+
+// Calcula la fecha del "n-ésimo día de la semana X" de un mes dado (ej. 3er
+// domingo). posicion 1-4 = esa ocurrencia; 5 (o cualquier valor >=5) = la
+// ÚLTIMA ocurrencia de ese día en el mes (soporta meses sin "quinto" domingo).
+function calcularNthDiaDelMes(anio, mes, posicion, nombreDiaObjetivo) {
+  const indiceDiaObjetivo = DIAS_SEMANA_LARGOS.findIndex(d => normalizarTexto(d) === nombreDiaObjetivo);
+  if (indiceDiaObjetivo === -1) return null;
+  if (posicion >= 5) {
+    const ultimoDiaMes = new Date(anio, mes + 1, 0, 12, 0, 0);
+    const cursor = new Date(ultimoDiaMes);
+    while (cursor.getDay() !== indiceDiaObjetivo) cursor.setDate(cursor.getDate() - 1);
+    return cursor;
   }
-  const inicio = parseFechaLocal(evento.fecha);
-  const fin = evento.fechafin ? parseFechaLocal(evento.fechafin) : null;
-  if (isNaN(inicio.getTime())) return false;
-  if (fechaDate < inicio) return false;
-  if (fin && fechaDate > fin) return false;
-  const nombreDia = normalizarTexto(DIAS_SEMANA_LARGOS[fechaDate.getDay()]);
-  return evento.diasemana.some(d => normalizarTexto(d) === nombreDia);
+  const primerDiaMes = new Date(anio, mes, 1, 12, 0, 0);
+  const diaEncontrado = 1 + ((indiceDiaObjetivo - primerDiaMes.getDay() + 7) % 7) + (posicion - 1) * 7;
+  const fecha = new Date(anio, mes, diaEncontrado, 12, 0, 0);
+  if (fecha.getMonth() !== mes) return null; // ese mes no tiene esa posición (ej. 5º domingo)
+  return fecha;
 }
 
 // Devuelve todas las fechas (Date) en que el evento tiene sesión dentro de [rangoInicio, rangoFin]
 function generarOcurrenciasEnRango(evento, rangoInicio, rangoFin) {
+  const inicio = parseFechaLocal(evento.fecha);
+  if (isNaN(inicio.getTime())) return [];
+
   if (!esRecurrente(evento)) {
-    const fecha = parseFechaLocal(evento.fecha);
-    if (isNaN(fecha.getTime())) return [];
-    if (fecha >= rangoInicio && fecha <= rangoFin) return [fecha];
+    if (inicio >= rangoInicio && inicio <= rangoFin) return [inicio];
     return [];
   }
-  const inicio = parseFechaLocal(evento.fecha);
-  const finSerie = evento.fechafin ? parseFechaLocal(evento.fechafin) : rangoFin;
-  const desde = inicio > rangoInicio ? inicio : rangoInicio;
-  const hasta = finSerie < rangoFin ? finSerie : rangoFin;
-  if (isNaN(inicio.getTime()) || desde > hasta) return [];
 
-  const diasNormalizados = evento.diasemana.map(normalizarTexto);
-  const ocurrencias = [];
-  const cursor = new Date(desde);
-  while (cursor <= hasta) {
-    const nombreDia = normalizarTexto(DIAS_SEMANA_LARGOS[cursor.getDay()]);
-    if (diasNormalizados.includes(nombreDia)) ocurrencias.push(new Date(cursor));
-    cursor.setDate(cursor.getDate() + 1);
+  const finSerie = evento.fechafin ? parseFechaLocal(evento.fechafin) : rangoFin;
+  const hasta = finSerie < rangoFin ? finSerie : rangoFin;
+  if (isNaN(hasta.getTime()) || inicio > hasta) return [];
+
+  const tipo = tipoRecurrencia(evento);
+
+  if (tipo === "semanal") {
+    const desde = inicio > rangoInicio ? inicio : rangoInicio;
+    if (desde > hasta) return [];
+    const diasNormalizados = evento.diasemana.map(normalizarTexto);
+    const ocurrencias = [];
+    const cursor = new Date(desde);
+    while (cursor <= hasta) {
+      const nombreDia = normalizarTexto(DIAS_SEMANA_LARGOS[cursor.getDay()]);
+      if (diasNormalizados.includes(nombreDia)) ocurrencias.push(new Date(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return ocurrencias;
   }
-  return ocurrencias;
+
+  if (tipo === "quincenal") {
+    const ocurrencias = [];
+    const cursor = new Date(inicio);
+    while (cursor <= hasta) {
+      if (cursor >= rangoInicio) ocurrencias.push(new Date(cursor));
+      cursor.setDate(cursor.getDate() + 14);
+    }
+    return ocurrencias;
+  }
+
+  if (tipo === "mensual") {
+    const diaMes = inicio.getDate();
+    const ocurrencias = [];
+    let cursor = new Date(inicio);
+    while (cursor <= hasta) {
+      if (cursor >= rangoInicio) ocurrencias.push(new Date(cursor));
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, diaMes, 12, 0, 0);
+    }
+    return ocurrencias;
+  }
+
+  if (tipo === "mensual_nth") {
+    const partes = String(evento.recurrenciadetalle || "").split("-");
+    const posicion = parseInt(partes[0], 10) || 1;
+    const nombreDiaObjetivo = normalizarTexto(partes[1] || "");
+    const ocurrencias = [];
+    let cursorMes = new Date(inicio.getFullYear(), inicio.getMonth(), 1, 12, 0, 0);
+    const finLoop = new Date(hasta.getFullYear(), hasta.getMonth(), 1, 12, 0, 0);
+    while (cursorMes <= finLoop) {
+      const fechaOcurrencia = calcularNthDiaDelMes(cursorMes.getFullYear(), cursorMes.getMonth(), posicion, nombreDiaObjetivo);
+      if (fechaOcurrencia && fechaOcurrencia >= inicio && fechaOcurrencia >= rangoInicio && fechaOcurrencia <= hasta) {
+        ocurrencias.push(fechaOcurrencia);
+      }
+      cursorMes = new Date(cursorMes.getFullYear(), cursorMes.getMonth() + 1, 1, 12, 0, 0);
+    }
+    return ocurrencias;
+  }
+
+  return [];
 }
 
 // Ocurrencias de un evento recurrente dentro del mes calendario en curso (a partir de
@@ -441,9 +511,18 @@ function ocurrenciasDelMesActual(evento) {
 
 function recurrenciaTexto(evento) {
   if (!esRecurrente(evento)) return null;
-  const dias = evento.diasemana.join(", ");
+  const tipo = tipoRecurrencia(evento);
   const fin = evento.fechafin ? formatearFecha(parseFechaLocal(evento.fechafin)) : "sin fecha fin definida";
-  return `🔁 Se repite: ${dias} · hasta ${fin}`;
+  if (tipo === "semanal") return `🔁 Se repite: ${evento.diasemana.join(", ")} · hasta ${fin}`;
+  if (tipo === "quincenal") return `🔁 Se repite cada 15 días · hasta ${fin}`;
+  if (tipo === "mensual") return `🔁 Se repite cada mes (mismo día) · hasta ${fin}`;
+  if (tipo === "mensual_nth") {
+    const partes = String(evento.recurrenciadetalle || "").split("-");
+    const posicion = parseInt(partes[0], 10) || 1;
+    const etiquetaPos = posicion >= 5 ? "último" : ["", "primer", "segundo", "tercer", "cuarto"][posicion];
+    return `🔁 Se repite el ${etiquetaPos} ${partes[1] || ""} de cada mes · hasta ${fin}`;
+  }
+  return `🔁 Recurrente · hasta ${fin}`;
 }
 
 // Interpreta el campo DetalleDias (ej. "Martes:Box,Miércoles:Zumba,Jueves:Yoga")
@@ -1462,8 +1541,18 @@ window.handleQuickAction = async function(accion) {
 // ---------- Panel Admin (modal): creación / cancelación de eventos, protegido con PIN ----------
 let adminState = { paso: "pin", pin: null, categoria: null, evento: null };
 
+// Se guarda en una variable de JS (no en localStorage/sessionStorage) para que
+// dure exactamente lo que pide el Comité: mientras la pestaña siga cargada. Un
+// refresh de página reinicia todo el JS del navegador, así que automáticamente
+// vuelve a pedir el PIN — no hace falta borrar nada a mano.
+let pinAdminValidadoEnSesion = null;
+
 window.abrirPanelAdmin = function() {
-  adminState = { paso: "pin", pin: null, categoria: null, evento: null };
+  if (pinAdminValidadoEnSesion) {
+    adminState = { paso: "menu", pin: pinAdminValidadoEnSesion, categoria: null, evento: null };
+  } else {
+    adminState = { paso: "pin", pin: null, categoria: null, evento: null };
+  }
   const modal = document.getElementById("modalAdmin");
   if (modal) modal.classList.remove("hidden");
   renderAdminPanel();
@@ -1473,6 +1562,196 @@ window.cerrarModalAdmin = function() {
   const modal = document.getElementById("modalAdmin");
   if (modal) modal.classList.add("hidden");
 };
+
+// Genera el HTML de los campos del formulario de evento, compartido entre
+// "Crear evento" y "Modificar eventos" (edición). `v` trae valores existentes
+// al editar, o {} al crear. Los campos de horario/cupo/costo/recurrencia se
+// ocultan cuando la categoría es "Impacto" (esos eventos son solo un anuncio
+// con lugar de recolección, sin registro).
+function camposFormularioEvento(v) {
+  v = v || {};
+  const diasSeleccionadosInicial = v.diasemana || [];
+  const tipoRecInicial = v.recurrencia || (diasSeleccionadosInicial.length ? "semanal" : "");
+  const detalleRecPartes = String(v.recurrenciadetalle || "").split("-");
+  const posInicial = detalleRecPartes[0] || "3";
+  const diaNthInicial = detalleRecPartes[1] || "Domingo";
+  const esImpactoInicial = v.categoria === "Impacto";
+
+  return `
+    <div class="space-y-2.5 max-h-[55vh] overflow-y-auto pr-1">
+      <div>
+        <label class="block text-xs font-bold text-slate-500 mb-1">Categoría</label>
+        <select id="fCategoria" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" ${v._esEdicion ? "disabled" : ""}>
+          ${Object.keys(CATEGORIAS).map(c => `<option value="${c}" ${v.categoria === c ? "selected" : ""}>${CATEGORIAS[c].emoji} ${CATEGORIAS[c].labelSidebar}</option>`).join("")}
+        </select>
+        ${v._esEdicion ? `<p class="text-[10px] text-slate-400 mt-1">La categoría no se puede cambiar al editar. Cancela el evento y créalo de nuevo en la otra categoría si lo necesitas mover.</p>` : ""}
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-500 mb-1">Nombre del evento</label>
+        <input id="fNombre" type="text" value="${escapeHtml(v.nombre || "")}" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-500 mb-1">Descripción</label>
+        <textarea id="fDescripcion" rows="2" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">${escapeHtml(v.descripcion || "")}</textarea>
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-500 mb-1" id="labelFecha">Fecha</label>
+        <input id="fFecha" type="date" value="${escapeHtml(v.fecha || "")}" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+      </div>
+
+      <div id="wrapperImpacto1" class="${esImpactoInicial ? "" : "hidden"}"></div>
+      <div id="wrapperNoImpacto1" class="${esImpactoInicial ? "hidden" : ""} space-y-2.5">
+        <div>
+          <label class="flex items-center gap-2 text-xs font-bold text-slate-500 cursor-pointer">
+            <input id="fSinHora" type="checkbox" class="rounded border-slate-300 text-brand-600 focus:ring-brand-500" ${v._esEdicion && !v.horaInicio ? "checked" : ""}>
+            Sin hora específica (ej. eventos de fin de mes)
+          </label>
+        </div>
+        <div id="wrapperHoras" class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-xs font-bold text-slate-500 mb-1">Hora inicio</label>
+            <input id="fHoraInicio" type="time" value="${escapeHtml(v.horaInicio || "")}" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-500 mb-1">Hora fin</label>
+            <input id="fHoraFin" type="time" value="${escapeHtml(v.horaFin || "")}" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-xs font-bold text-slate-500 mb-1" id="labelUbicacion">${esImpactoInicial ? "Lugar de recolección" : "Ubicación"}</label>
+        <select id="fUbicacion" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          ${UBICACIONES.map(u => `<option value="${escapeHtml(u)}" ${v.ubicacion === u ? "selected" : ""}>${escapeHtml(u)}</option>`).join("")}
+        </select>
+      </div>
+
+      <div id="wrapperNoImpacto2" class="${esImpactoInicial ? "hidden" : ""} space-y-2.5">
+        <div>
+          <label class="flex items-center gap-2 text-xs font-bold text-slate-500 cursor-pointer">
+            <input id="fTieneCosto" type="checkbox" class="rounded border-slate-300 text-brand-600 focus:ring-brand-500" ${v.tieneCosto ? "checked" : ""}>
+            Este evento tiene costo (el registro queda PENDIENTE hasta que el Comité confirme el pago en "Aprobar registros de pago")
+          </label>
+        </div>
+        <div>
+          <label class="flex items-center gap-2 text-xs font-bold text-slate-500 cursor-pointer">
+            <input id="fSinCupo" type="checkbox" class="rounded border-slate-300 text-brand-600 focus:ring-brand-500" ${v.sinCupo ? "checked" : ""}>
+            Sin límite de cupo (ej. donativos, colectas)
+          </label>
+        </div>
+        <div id="wrapperCupo">
+          <label class="block text-xs font-bold text-slate-500 mb-1">Cupo total (por sesión si es recurrente)</label>
+          <input id="fCupo" type="number" min="1" value="${escapeHtml(String(v.cupoTotal || ""))}" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1">Excepción de personas por depto (opcional)</label>
+          <input id="fHuellasMaxDepto" type="number" min="1" value="${escapeHtml(String(v.huellasMaxDepto || ""))}" placeholder="Vacío = usa el máximo real de huellas del depto" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          <p class="text-[10px] text-slate-400 mt-1">Por default, cada depto puede registrar hasta el número de huellas que tiene asignadas en la pestaña "Departamentos" del Sheet. Llena esto SOLO si este evento necesita un tope distinto.</p>
+        </div>
+      </div>
+
+      <div id="wrapperNoImpacto3" class="${esImpactoInicial ? "hidden" : ""} border-t border-slate-100 pt-2.5">
+        <label class="block text-xs font-bold text-slate-500 mb-1.5">¿Se repite?</label>
+        <select id="fTipoRecurrencia" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mb-2">
+          <option value="">No, es un evento único</option>
+          <option value="semanal" ${tipoRecInicial === "semanal" ? "selected" : ""}>Semanal (elige días, ej. Zumba Lun/Mié/Sáb)</option>
+          <option value="quincenal" ${tipoRecInicial === "quincenal" ? "selected" : ""}>Cada 15 días</option>
+          <option value="mensual" ${tipoRecInicial === "mensual" ? "selected" : ""}>Cada mes (mismo día de mes)</option>
+          <option value="mensual_nth" ${tipoRecInicial === "mensual_nth" ? "selected" : ""}>Cada mes, un día específico (ej. tercer domingo)</option>
+        </select>
+
+        <div id="wrapperSemanal" class="hidden">
+          <p class="text-[10px] text-slate-400 mb-2">Cada sesión tendrá su propio cupo independiente (el de arriba), no uno compartido para toda la serie.</p>
+          <div class="flex flex-wrap gap-1.5 mb-2">
+            ${DIAS_CHECKBOX.map(d => `
+              <label class="flex items-center gap-1 text-[11px] font-bold text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 cursor-pointer">
+                <input type="checkbox" class="fDiaSemana rounded border-slate-300 text-brand-600 focus:ring-brand-500" value="${d}" ${diasSeleccionadosInicial.includes(d) ? "checked" : ""}> ${d}
+              </label>`).join("")}
+          </div>
+          <div class="mt-2">
+            <label class="block text-xs font-bold text-slate-500 mb-1">¿Cada día es una actividad distinta? (opcional)</label>
+            <input id="fDetalleDias" type="text" value="${escapeHtml(v.detalleDias || "")}" placeholder="Ej: Martes:Box, Miércoles:Zumba, Jueves:Yoga" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          </div>
+        </div>
+
+        <div id="wrapperMensualNth" class="hidden grid grid-cols-2 gap-2 mb-2">
+          <div>
+            <label class="block text-xs font-bold text-slate-500 mb-1">¿Cuál?</label>
+            <select id="fPosicionNth" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+              <option value="1" ${posInicial === "1" ? "selected" : ""}>Primer</option>
+              <option value="2" ${posInicial === "2" ? "selected" : ""}>Segundo</option>
+              <option value="3" ${posInicial === "3" ? "selected" : ""}>Tercer</option>
+              <option value="4" ${posInicial === "4" ? "selected" : ""}>Cuarto</option>
+              <option value="5" ${posInicial === "5" ? "selected" : ""}>Último</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-500 mb-1">Día</label>
+            <select id="fDiaNth" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+              ${DIAS_SEMANA_LARGOS.map(d => `<option value="${d}" ${diaNthInicial === d ? "selected" : ""}>${d}</option>`).join("")}
+            </select>
+          </div>
+        </div>
+
+        <div id="wrapperFechaFin" class="${(tipoRecInicial && tipoRecInicial !== "") ? "" : "hidden"}">
+          <label class="block text-xs font-bold text-slate-500 mb-1">Fecha fin de la serie</label>
+          <input id="fFechaFin" type="date" value="${escapeHtml(v.fechaFin || "")}" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          <p class="text-[10px] text-slate-400 mt-1">La fecha de arriba es el inicio; se repetirá hasta esta fecha.</p>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// Listeners compartidos del formulario (crear y editar usan el mismo HTML).
+// Se llama SIEMPRE después de inyectar camposFormularioEvento() en el DOM.
+function adjuntarListenersFormularioEvento() {
+  const selCategoria = document.getElementById("fCategoria");
+  const toggleImpacto = () => {
+    const esImpacto = selCategoria.value === "Impacto";
+    ["wrapperNoImpacto1", "wrapperNoImpacto2", "wrapperNoImpacto3"].forEach(id => {
+      document.getElementById(id).classList.toggle("hidden", esImpacto);
+    });
+    document.getElementById("labelUbicacion").textContent = esImpacto ? "Lugar de recolección" : "Ubicación";
+  };
+  selCategoria.addEventListener("change", toggleImpacto);
+  toggleImpacto();
+
+  const selTipoRec = document.getElementById("fTipoRecurrencia");
+  const toggleRecurrencia = () => {
+    const tipo = selTipoRec.value;
+    document.getElementById("wrapperSemanal").classList.toggle("hidden", tipo !== "semanal");
+    document.getElementById("wrapperMensualNth").classList.toggle("hidden", tipo !== "mensual_nth");
+    document.getElementById("wrapperFechaFin").classList.toggle("hidden", !tipo);
+  };
+  selTipoRec.addEventListener("change", toggleRecurrencia);
+  toggleRecurrencia();
+
+  document.getElementById("fSinHora").addEventListener("change", (e) => {
+    const wrapper = document.getElementById("wrapperHoras");
+    const hi = document.getElementById("fHoraInicio");
+    const hf = document.getElementById("fHoraFin");
+    if (e.target.checked) {
+      wrapper.classList.add("opacity-40", "pointer-events-none");
+      hi.value = ""; hf.value = "";
+    } else {
+      wrapper.classList.remove("opacity-40", "pointer-events-none");
+    }
+  });
+  if (document.getElementById("fSinHora").checked) document.getElementById("fSinHora").dispatchEvent(new Event("change"));
+
+  document.getElementById("fSinCupo").addEventListener("change", (e) => {
+    const wrapper = document.getElementById("wrapperCupo");
+    const cupoInput = document.getElementById("fCupo");
+    if (e.target.checked) {
+      wrapper.classList.add("opacity-40", "pointer-events-none");
+      cupoInput.value = "";
+    } else {
+      wrapper.classList.remove("opacity-40", "pointer-events-none");
+    }
+  });
+  if (document.getElementById("fSinCupo").checked) document.getElementById("fSinCupo").dispatchEvent(new Event("change"));
+}
 
 function renderAdminPanel() {
   const body = document.getElementById("adminBody");
@@ -1502,6 +1781,7 @@ function renderAdminPanel() {
         const data = await res.json();
         if (data.ok) {
           adminState.pin = pin;
+          pinAdminValidadoEnSesion = pin;
           adminState.paso = "menu";
           renderAdminPanel();
         } else {
@@ -1528,137 +1808,180 @@ function renderAdminPanel() {
     body.innerHTML = `
       <div class="space-y-2">
         <button id="adminBtnCrear" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg py-2.5 transition">➕ Crear evento</button>
+        <button id="adminBtnModificar" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg py-2.5 transition">✏️ Modificar eventos</button>
         <button id="adminBtnCancelar" class="w-full bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-lg py-2.5 transition">🛑 Cancelar evento</button>
-        <button id="adminBtnBajaResidente" class="w-full bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-lg py-2.5 transition">🙅 Dar de baja a un residente</button>
+        <button id="adminBtnAprobarPagos" class="w-full bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-lg py-2.5 transition">💳 Aprobar registros de pago</button>
+        <button id="adminBtnAsistencias" class="w-full bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-lg py-2.5 transition">📋 Asistencias y bloqueados</button>
+        <button id="adminBtnBajaResidente" class="w-full bg-slate-700 hover:bg-slate-800 text-white text-sm font-bold rounded-lg py-2.5 transition">🙅 Dar de baja a un residente</button>
       </div>
     `;
     document.getElementById("adminBtnCrear").addEventListener("click", () => { adminState.paso = "crear"; renderAdminPanel(); });
+    document.getElementById("adminBtnModificar").addEventListener("click", () => { adminState.paso = "modificar_categoria"; renderAdminPanel(); });
     document.getElementById("adminBtnCancelar").addEventListener("click", () => { adminState.paso = "cancelar_categoria"; renderAdminPanel(); });
+    document.getElementById("adminBtnAprobarPagos").addEventListener("click", () => { adminState.paso = "aprobar_lista"; renderAdminPanel(); cargarPendientes(); });
+    document.getElementById("adminBtnAsistencias").addEventListener("click", () => { adminState.paso = "asistencias_menu"; renderAdminPanel(); });
     document.getElementById("adminBtnBajaResidente").addEventListener("click", () => { adminState.paso = "baja_categoria"; renderAdminPanel(); });
     return;
   }
 
   // ---- Paso 3a: Crear evento (con date/time/ubicación pickers) ----
   if (adminState.paso === "crear") {
-    body.innerHTML = `
-      <div class="space-y-2.5 max-h-[55vh] overflow-y-auto pr-1">
-        <div>
-          <label class="block text-xs font-bold text-slate-500 mb-1">Categoría</label>
-          <select id="fCategoria" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-            ${Object.keys(CATEGORIAS).map(c => `<option value="${c}">${CATEGORIAS[c].emoji} ${CATEGORIAS[c].labelSidebar}</option>`).join("")}
-          </select>
-        </div>
-        <div>
-          <label class="block text-xs font-bold text-slate-500 mb-1">Nombre del evento</label>
-          <input id="fNombre" type="text" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-        </div>
-        <div>
-          <label class="block text-xs font-bold text-slate-500 mb-1">Descripción</label>
-          <textarea id="fDescripcion" rows="2" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"></textarea>
-        </div>
-        <div>
-          <label class="block text-xs font-bold text-slate-500 mb-1">Fecha</label>
-          <input id="fFecha" type="date" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-        </div>
-        <div>
-          <label class="flex items-center gap-2 text-xs font-bold text-slate-500 cursor-pointer">
-            <input id="fSinHora" type="checkbox" class="rounded border-slate-300 text-brand-600 focus:ring-brand-500">
-            Sin hora específica (ej. eventos de fin de mes)
-          </label>
-        </div>
-        <div id="wrapperHoras" class="grid grid-cols-2 gap-2">
-          <div>
-            <label class="block text-xs font-bold text-slate-500 mb-1">Hora inicio</label>
-            <input id="fHoraInicio" type="time" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-          </div>
-          <div>
-            <label class="block text-xs font-bold text-slate-500 mb-1">Hora fin</label>
-            <input id="fHoraFin" type="time" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-          </div>
-        </div>
-        <div>
-          <label class="block text-xs font-bold text-slate-500 mb-1">Ubicación</label>
-          <select id="fUbicacion" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-            ${UBICACIONES.map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join("")}
-          </select>
-        </div>
-        <div>
-          <label class="flex items-center gap-2 text-xs font-bold text-slate-500 cursor-pointer">
-            <input id="fTieneCosto" type="checkbox" class="rounded border-slate-300 text-brand-600 focus:ring-brand-500">
-            Este evento tiene costo (no se pide el monto, solo se avisa en el detalle)
-          </label>
-        </div>
-        <div>
-          <label class="flex items-center gap-2 text-xs font-bold text-slate-500 cursor-pointer">
-            <input id="fSinCupo" type="checkbox" class="rounded border-slate-300 text-brand-600 focus:ring-brand-500">
-            Sin límite de cupo (ej. donativos, colectas)
-          </label>
-        </div>
-        <div id="wrapperCupo">
-          <label class="block text-xs font-bold text-slate-500 mb-1">Cupo total (por sesión si es recurrente)</label>
-          <input id="fCupo" type="number" min="1" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-        </div>
-        <div>
-          <label class="block text-xs font-bold text-slate-500 mb-1">Excepción de personas por depto (opcional)</label>
-          <input id="fHuellasMaxDepto" type="number" min="1" placeholder="Vacío = usa el máximo real de huellas del depto" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-          <p class="text-[10px] text-slate-400 mt-1">Por default, cada depto puede registrar hasta el número de huellas que tiene asignadas en la pestaña "Departamentos" del Sheet (titular + acompañantes cuentan como huellas). Llena este campo SOLO si este evento en particular necesita un tope distinto (ej. máximo 2 por depto aunque el depto tenga más huellas).</p>
-        </div>
-        <div class="border-t border-slate-100 pt-2.5">
-          <label class="block text-xs font-bold text-slate-500 mb-1.5">¿Se repite cada semana? (ej. Zumba Lun/Mié/Sáb)</label>
-          <p class="text-[10px] text-slate-400 mb-2">Cada sesión tendrá su propio cupo independiente (el de arriba), no uno compartido para toda la serie.</p>
-          <div class="flex flex-wrap gap-1.5 mb-2">
-            ${DIAS_CHECKBOX.map(d => `
-              <label class="flex items-center gap-1 text-[11px] font-bold text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 cursor-pointer">
-                <input type="checkbox" class="fDiaSemana rounded border-slate-300 text-brand-600 focus:ring-brand-500" value="${d}"> ${d}
-              </label>`).join("")}
-          </div>
-          <div id="wrapperFechaFin" class="hidden">
-            <label class="block text-xs font-bold text-slate-500 mb-1">Fecha fin de la serie</label>
-            <input id="fFechaFin" type="date" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-            <p class="text-[10px] text-slate-400 mt-1">La fecha de arriba es el inicio; se repetirá en los días marcados hasta esta fecha.</p>
-          </div>
-          <div id="wrapperDetalleDias" class="hidden mt-2.5">
-            <label class="block text-xs font-bold text-slate-500 mb-1">¿Cada día es una actividad distinta? (opcional)</label>
-            <input id="fDetalleDias" type="text" placeholder="Ej: Martes:Box, Miércoles:Zumba, Jueves:Yoga" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-            <p class="text-[10px] text-slate-400 mt-1">Solo si aplica (ej. un paquete de clases grupales donde cada día es otra actividad). Formato "Día:Actividad" separados por comas. Déjalo vacío si todas las sesiones son la misma actividad (ej. Zumba todos los días marcados).</p>
-          </div>
-        </div>
-      </div>
+    body.innerHTML = camposFormularioEvento({}) + `
       <div class="flex gap-2 mt-4">
         <button id="adminBtnVolverMenu1" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg py-2.5 transition">← Volver</button>
         <button id="adminBtnGuardarEvento" class="flex-1 bg-brand-600 hover:bg-brand-700 text-white text-sm font-bold rounded-lg py-2.5 transition">Crear evento</button>
       </div>
     `;
-    document.querySelectorAll(".fDiaSemana").forEach(chk => {
-      chk.addEventListener("change", () => {
-        const algunoMarcado = Array.from(document.querySelectorAll(".fDiaSemana")).some(c => c.checked);
-        document.getElementById("wrapperFechaFin").classList.toggle("hidden", !algunoMarcado);
-        document.getElementById("wrapperDetalleDias").classList.toggle("hidden", !algunoMarcado);
-      });
-    });
-    document.getElementById("fSinHora").addEventListener("change", (e) => {
-      const wrapper = document.getElementById("wrapperHoras");
-      const hi = document.getElementById("fHoraInicio");
-      const hf = document.getElementById("fHoraFin");
-      if (e.target.checked) {
-        wrapper.classList.add("opacity-40", "pointer-events-none");
-        hi.value = ""; hf.value = "";
-      } else {
-        wrapper.classList.remove("opacity-40", "pointer-events-none");
-      }
-    });
-    document.getElementById("fSinCupo").addEventListener("change", (e) => {
-      const wrapper = document.getElementById("wrapperCupo");
-      const cupoInput = document.getElementById("fCupo");
-      if (e.target.checked) {
-        wrapper.classList.add("opacity-40", "pointer-events-none");
-        cupoInput.value = "";
-      } else {
-        wrapper.classList.remove("opacity-40", "pointer-events-none");
-      }
-    });
+    adjuntarListenersFormularioEvento();
     document.getElementById("adminBtnVolverMenu1").addEventListener("click", () => { adminState.paso = "menu"; renderAdminPanel(); });
     document.getElementById("adminBtnGuardarEvento").addEventListener("click", crearEventoDesdeAdmin);
+    return;
+  }
+
+  // ---- Modificar eventos: elegir categoría ----
+  if (adminState.paso === "modificar_categoria") {
+    body.innerHTML = `
+      <p class="text-sm text-slate-600 mb-3">¿De qué categoría es el evento a modificar?</p>
+      <div class="space-y-2">
+        ${Object.keys(CATEGORIAS).map(c => `<button class="admin-cat-btn w-full text-left bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg px-3 py-2.5 transition" data-cat="${c}">${CATEGORIAS[c].emoji} ${CATEGORIAS[c].labelSidebar}</button>`).join("")}
+      </div>
+      <button id="adminBtnVolverMenuMod" class="w-full mt-3 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-lg py-2 transition">← Volver</button>
+    `;
+    document.querySelectorAll(".admin-cat-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        adminState.categoria = btn.getAttribute("data-cat");
+        adminState.paso = "modificar_lista";
+        renderAdminPanel();
+      });
+    });
+    document.getElementById("adminBtnVolverMenuMod").addEventListener("click", () => { adminState.paso = "menu"; renderAdminPanel(); });
+    return;
+  }
+
+  // ---- Modificar eventos: elegir el evento activo ----
+  if (adminState.paso === "modificar_lista") {
+    const activos = (DATA[adminState.categoria] || []).filter(e => e.estado.toLowerCase() === "activo")
+      .sort((a, b) => parseFechaLocal(a.fecha) - parseFechaLocal(b.fecha));
+    body.innerHTML = `
+      <p class="text-sm text-slate-600 mb-3">¿Qué evento quieres modificar?</p>
+      <div class="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
+        ${activos.length ? activos.map(ev => `
+          <button class="admin-ev-mod-btn w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-3 py-2 transition" data-id="${ev.eventoid}">
+            <span class="font-bold text-slate-800 text-sm block">${esRecurrente(ev) ? "🔁 " : ""}${escapeHtml(ev.nombre)}</span>
+            <span class="text-xs text-slate-500">${ev.fecha} · ${escapeHtml(ev.ubicacion || "N/A")}</span>
+          </button>`).join("")
+          : `<p class="text-xs text-slate-400">No hay eventos activos en esta categoría.</p>`}
+      </div>
+      <button id="adminBtnVolverCatMod" class="w-full mt-3 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-lg py-2 transition">← Volver</button>
+    `;
+    document.querySelectorAll(".admin-ev-mod-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        adminState.evento = activos.find(e => e.eventoid === btn.getAttribute("data-id"));
+        adminState.paso = "editar_form";
+        renderAdminPanel();
+      });
+    });
+    document.getElementById("adminBtnVolverCatMod").addEventListener("click", () => { adminState.paso = "modificar_categoria"; renderAdminPanel(); });
+    return;
+  }
+
+  // ---- Modificar eventos: formulario de edición (mismo formulario que crear, precargado) ----
+  if (adminState.paso === "editar_form") {
+    const ev = adminState.evento;
+    const valores = {
+      categoria: ev.categoria,
+      nombre: ev.nombre,
+      descripcion: ev.descripcion,
+      fecha: ev.fecha,
+      horaInicio: ev.horainicio,
+      horaFin: ev.horafin,
+      ubicacion: ev.ubicacion,
+      tieneCosto: ev.tienecosto,
+      sinCupo: !ev.cupototal && ev.cupototal !== 0,
+      cupoTotal: ev.cupototal,
+      huellasMaxDepto: "",
+      detalleDias: ev.detalledias,
+      diasemana: ev.diasemana,
+      recurrencia: tipoRecurrencia(ev),
+      recurrenciadetalle: ev.recurrenciadetalle,
+      fechaFin: ev.fechafin,
+      _esEdicion: true
+    };
+    body.innerHTML = camposFormularioEvento(valores) + `
+      <div>
+        <label class="flex items-center gap-2 text-xs font-bold text-slate-500 cursor-pointer mt-1">
+          <input id="fEventoActivo" type="checkbox" checked class="rounded border-slate-300 text-brand-600 focus:ring-brand-500">
+          Evento activo (destílcalo para "cancelarlo" sin borrar su historial)
+        </label>
+      </div>
+      <div class="flex gap-2 mt-4">
+        <button id="adminBtnVolverListaMod" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg py-2.5 transition">← Volver</button>
+        <button id="adminBtnGuardarEdicion" class="flex-1 bg-brand-600 hover:bg-brand-700 text-white text-sm font-bold rounded-lg py-2.5 transition">Guardar cambios</button>
+      </div>
+    `;
+    adjuntarListenersFormularioEvento();
+    document.getElementById("adminBtnVolverListaMod").addEventListener("click", () => { adminState.paso = "modificar_lista"; renderAdminPanel(); });
+    document.getElementById("adminBtnGuardarEdicion").addEventListener("click", guardarEdicionEvento);
+    return;
+  }
+
+  // ---- Aprobar registros de pago ----
+  if (adminState.paso === "aprobar_lista") {
+    body.innerHTML = `
+      <p class="text-xs text-slate-500 mb-2">Registros de eventos con costo esperando confirmación de pago.</p>
+      <div id="listaPendientes" class="space-y-2 max-h-[55vh] overflow-y-auto pr-1"><p class="text-xs text-slate-400">Cargando…</p></div>
+      <button id="adminBtnVolverMenuAprobar" class="w-full mt-3 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-lg py-2 transition">← Volver</button>
+    `;
+    document.getElementById("adminBtnVolverMenuAprobar").addEventListener("click", () => { adminState.paso = "menu"; renderAdminPanel(); });
+    cargarPendientes();
+    return;
+  }
+
+  // ---- Asistencias y bloqueados: submenú ----
+  if (adminState.paso === "asistencias_menu") {
+    body.innerHTML = `
+      <div class="space-y-2">
+        <button id="adminBtnVerAsistenciasMes" class="w-full bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-lg py-2.5 transition">📅 Registros del mes (marcar asistencia)</button>
+        <button id="adminBtnVerBloqueados" class="w-full bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold rounded-lg py-2.5 transition">🚫 Ver bloqueados</button>
+      </div>
+      <button id="adminBtnVolverMenuAsist" class="w-full mt-3 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-lg py-2 transition">← Volver</button>
+    `;
+    document.getElementById("adminBtnVerAsistenciasMes").addEventListener("click", () => {
+      adminState.mesSeleccionado = adminState.mesSeleccionado || new Date().toISOString().slice(0, 7);
+      adminState.paso = "asistencias_lista";
+      renderAdminPanel();
+    });
+    document.getElementById("adminBtnVerBloqueados").addEventListener("click", () => { adminState.paso = "bloqueados_lista"; renderAdminPanel(); });
+    document.getElementById("adminBtnVolverMenuAsist").addEventListener("click", () => { adminState.paso = "menu"; renderAdminPanel(); });
+    return;
+  }
+
+  // ---- Asistencias: registros del mes seleccionado ----
+  if (adminState.paso === "asistencias_lista") {
+    body.innerHTML = `
+      <div class="flex items-center justify-between mb-2">
+        <button id="adminBtnMesAnterior" class="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs">← Mes ant.</button>
+        <span class="text-xs font-bold text-slate-700">${adminState.mesSeleccionado}</span>
+        <button id="adminBtnMesSiguiente" class="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs">Mes sig. →</button>
+      </div>
+      <div id="listaAsistenciasMes" class="space-y-2 max-h-[50vh] overflow-y-auto pr-1"><p class="text-xs text-slate-400">Cargando…</p></div>
+      <button id="adminBtnVolverAsistMenu" class="w-full mt-3 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-lg py-2 transition">← Volver</button>
+    `;
+    document.getElementById("adminBtnMesAnterior").addEventListener("click", () => cambiarMesAsistencia(-1));
+    document.getElementById("adminBtnMesSiguiente").addEventListener("click", () => cambiarMesAsistencia(1));
+    document.getElementById("adminBtnVolverAsistMenu").addEventListener("click", () => { adminState.paso = "asistencias_menu"; renderAdminPanel(); });
+    cargarRegistrosMes();
+    return;
+  }
+
+  // ---- Lista de bloqueados ----
+  if (adminState.paso === "bloqueados_lista") {
+    body.innerHTML = `
+      <div id="listaBloqueados" class="space-y-2 max-h-[55vh] overflow-y-auto pr-1"><p class="text-xs text-slate-400">Cargando…</p></div>
+      <button id="adminBtnVolverBloqMenu" class="w-full mt-3 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-lg py-2 transition">← Volver</button>
+    `;
+    document.getElementById("adminBtnVolverBloqMenu").addEventListener("click", () => { adminState.paso = "asistencias_menu"; renderAdminPanel(); });
+    cargarBloqueados();
     return;
   }
 
@@ -1803,49 +2126,68 @@ function renderAdminPanel() {
   }
 }
 
+// Lee todos los campos del formulario compartido (crear/editar). Cuando la
+// categoría es "Impacto" se ignoran horario/cupo/costo/recurrencia — esos
+// eventos son solo un anuncio informativo con lugar de recolección.
+function leerCamposFormularioEvento() {
+  const categoria = document.getElementById("fCategoria").value;
+  const esImpacto = categoria === "Impacto";
+  const nombre = document.getElementById("fNombre").value.trim();
+  const descripcion = document.getElementById("fDescripcion").value.trim();
+  const fecha = document.getElementById("fFecha").value;
+  const horaInicio = esImpacto ? "" : document.getElementById("fHoraInicio").value;
+  const horaFin = esImpacto ? "" : document.getElementById("fHoraFin").value;
+  const ubicacion = document.getElementById("fUbicacion").value;
+  const sinCupo = esImpacto ? true : document.getElementById("fSinCupo").checked;
+  const cupoTotal = esImpacto || sinCupo ? "" : (document.getElementById("fCupo").value || "0");
+  const tieneCosto = esImpacto ? false : document.getElementById("fTieneCosto").checked;
+  const huellasMaxDepto = esImpacto ? "" : document.getElementById("fHuellasMaxDepto").value.trim();
+
+  const tipoRecurrencia = esImpacto ? "" : document.getElementById("fTipoRecurrencia").value;
+  let diasSemana = "", detalleDias = "", fechaFin = "", recurrenciaDetalle = "";
+  if (tipoRecurrencia === "semanal") {
+    diasSemana = Array.from(document.querySelectorAll(".fDiaSemana:checked")).map(c => c.value).join(",");
+    detalleDias = document.getElementById("fDetalleDias").value.trim();
+    fechaFin = document.getElementById("fFechaFin").value;
+  } else if (tipoRecurrencia === "quincenal" || tipoRecurrencia === "mensual") {
+    fechaFin = document.getElementById("fFechaFin").value;
+  } else if (tipoRecurrencia === "mensual_nth") {
+    recurrenciaDetalle = `${document.getElementById("fPosicionNth").value}-${document.getElementById("fDiaNth").value}`;
+    fechaFin = document.getElementById("fFechaFin").value;
+  }
+
+  return { categoria, nombre, descripcion, fecha, horaInicio, horaFin, ubicacion, sinCupo, cupoTotal, tieneCosto, huellasMaxDepto, tipoRecurrencia, diasSemana, detalleDias, fechaFin, recurrenciaDetalle };
+}
+
+function validarCamposFormularioEvento(f) {
+  if (!f.nombre || !f.fecha) return "Nombre y fecha son obligatorios.";
+  if (f.categoria !== "Impacto") {
+    if (!f.sinCupo && (!f.cupoTotal || Number(f.cupoTotal) <= 0)) return "Indica un cupo total mayor a 0, o marca \"Sin límite de cupo\".";
+    if (f.tipoRecurrencia === "semanal" && !f.diasSemana) return "Marca al menos un día de la semana para la repetición semanal.";
+    if (f.tipoRecurrencia && !f.fechaFin) return "Marcaste que se repite: indica la fecha fin de la serie.";
+    if (f.tipoRecurrencia && f.fechaFin < f.fecha) return "La fecha fin no puede ser anterior a la fecha de inicio.";
+  }
+  return null;
+}
+
+function construirQueryStringEvento(f) {
+  return `categoria=${encodeURIComponent(f.categoria)}&nombre=${encodeURIComponent(f.nombre)}&descripcion=${encodeURIComponent(f.descripcion)}&fecha=${encodeURIComponent(f.fecha)}&horaInicio=${encodeURIComponent(f.horaInicio)}&horaFin=${encodeURIComponent(f.horaFin)}&ubicacion=${encodeURIComponent(f.ubicacion)}&cupoTotal=${encodeURIComponent(f.cupoTotal)}&sinCupo=${f.sinCupo ? "1" : "0"}&tieneCosto=${f.tieneCosto ? "1" : "0"}&diasSemana=${encodeURIComponent(f.diasSemana)}&fechaFin=${encodeURIComponent(f.fechaFin)}&huellasMaxDepto=${encodeURIComponent(f.huellasMaxDepto)}&detalleDias=${encodeURIComponent(f.detalleDias)}&recurrencia=${encodeURIComponent(f.tipoRecurrencia)}&recurrenciaDetalle=${encodeURIComponent(f.recurrenciaDetalle)}`;
+}
+
 async function crearEventoDesdeAdmin() {
   const btn = document.getElementById("adminBtnGuardarEvento");
   if (btn) { if (btn.disabled) return; btn.disabled = true; btn.textContent = "Guardando…"; }
 
-  const categoria = document.getElementById("fCategoria").value;
-  const nombre = document.getElementById("fNombre").value.trim();
-  const descripcion = document.getElementById("fDescripcion").value.trim();
-  const fecha = document.getElementById("fFecha").value;
-  const horaInicio = document.getElementById("fHoraInicio").value;
-  const horaFin = document.getElementById("fHoraFin").value;
-  const ubicacion = document.getElementById("fUbicacion").value;
-  const sinCupo = document.getElementById("fSinCupo").checked;
-  const cupoTotal = sinCupo ? "" : (document.getElementById("fCupo").value || "0");
-  const tieneCosto = document.getElementById("fTieneCosto").checked;
-  const huellasMaxDepto = document.getElementById("fHuellasMaxDepto").value.trim();
-  const diasSeleccionados = Array.from(document.querySelectorAll(".fDiaSemana:checked")).map(c => c.value);
-  const diasSemana = diasSeleccionados.join(",");
-  const fechaFin = diasSeleccionados.length ? document.getElementById("fFechaFin").value : "";
-  const detalleDias = diasSeleccionados.length ? document.getElementById("fDetalleDias").value.trim() : "";
-
-  if (!nombre || !fecha) {
-    alert("Nombre y fecha son obligatorios.");
-    if (btn) { btn.disabled = false; btn.textContent = "Crear evento"; }
-    return;
-  }
-  if (!sinCupo && (!cupoTotal || Number(cupoTotal) <= 0)) {
-    alert("Indica un cupo total mayor a 0, o marca \"Sin límite de cupo\".");
-    if (btn) { btn.disabled = false; btn.textContent = "Crear evento"; }
-    return;
-  }
-  if (diasSeleccionados.length && !fechaFin) {
-    alert("Marcaste días de repetición: indica la fecha fin de la serie.");
-    if (btn) { btn.disabled = false; btn.textContent = "Crear evento"; }
-    return;
-  }
-  if (diasSeleccionados.length && fechaFin < fecha) {
-    alert("La fecha fin no puede ser anterior a la fecha de inicio.");
+  const f = leerCamposFormularioEvento();
+  const errorValidacion = validarCamposFormularioEvento(f);
+  if (errorValidacion) {
+    alert(errorValidacion);
     if (btn) { btn.disabled = false; btn.textContent = "Crear evento"; }
     return;
   }
 
   try {
-    const url = `${URL_AGENTE_EVENTOS}?accion=crear_evento&pin=${encodeURIComponent(adminState.pin)}&categoria=${encodeURIComponent(categoria)}&nombre=${encodeURIComponent(nombre)}&descripcion=${encodeURIComponent(descripcion)}&fecha=${encodeURIComponent(fecha)}&horaInicio=${encodeURIComponent(horaInicio)}&horaFin=${encodeURIComponent(horaFin)}&ubicacion=${encodeURIComponent(ubicacion)}&cupoTotal=${encodeURIComponent(cupoTotal)}&sinCupo=${sinCupo ? "1" : "0"}&tieneCosto=${tieneCosto ? "1" : "0"}&diasSemana=${encodeURIComponent(diasSemana)}&fechaFin=${encodeURIComponent(fechaFin)}&huellasMaxDepto=${encodeURIComponent(huellasMaxDepto)}&detalleDias=${encodeURIComponent(detalleDias)}`;
+    const url = `${URL_AGENTE_EVENTOS}?accion=crear_evento&pin=${encodeURIComponent(adminState.pin)}&${construirQueryStringEvento(f)}`;
     const res = await fetch(url, { cache: "no-store" });
     const data = await res.json();
     if (data.ok) {
@@ -1859,6 +2201,197 @@ async function crearEventoDesdeAdmin() {
   } catch (err) {
     alert("Error de conexión: " + err.toString());
     if (btn) { btn.disabled = false; btn.textContent = "Crear evento"; }
+  }
+}
+
+async function guardarEdicionEvento() {
+  const btn = document.getElementById("adminBtnGuardarEdicion");
+  if (btn) { if (btn.disabled) return; btn.disabled = true; btn.textContent = "Guardando…"; }
+
+  const f = leerCamposFormularioEvento();
+  f.categoria = adminState.evento.categoria; // el select va disabled al editar; se toma del estado por seguridad
+  const errorValidacion = validarCamposFormularioEvento(f);
+  if (errorValidacion) {
+    alert(errorValidacion);
+    if (btn) { btn.disabled = false; btn.textContent = "Guardar cambios"; }
+    return;
+  }
+  const estado = document.getElementById("fEventoActivo").checked ? "Activo" : "Cancelado";
+
+  try {
+    const url = `${URL_AGENTE_EVENTOS}?accion=editar_evento&pin=${encodeURIComponent(adminState.pin)}&eventoId=${encodeURIComponent(adminState.evento.eventoid)}&estado=${encodeURIComponent(estado)}&${construirQueryStringEvento(f)}`;
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json();
+    if (data.ok) {
+      alert("Evento actualizado correctamente.");
+      window.cerrarModalAdmin();
+      inicializar();
+    } else {
+      alert(data.error || "No se pudo actualizar el evento. Verifica el PIN.");
+      if (btn) { btn.disabled = false; btn.textContent = "Guardar cambios"; }
+    }
+  } catch (err) {
+    alert("Error de conexión: " + err.toString());
+    if (btn) { btn.disabled = false; btn.textContent = "Guardar cambios"; }
+  }
+}
+
+// ---------- Aprobar registros de pago ----------
+async function cargarPendientes() {
+  const cont = document.getElementById("listaPendientes");
+  if (cont) cont.innerHTML = `<p class="text-xs text-slate-400">Cargando…</p>`;
+  try {
+    const res = await fetch(`${URL_AGENTE_EVENTOS}?accion=listar_pendientes&pin=${encodeURIComponent(adminState.pin)}`, { cache: "no-store" });
+    const data = await res.json();
+    if (!data.ok) { if (cont) cont.innerHTML = `<p class="text-xs text-red-600">${escapeHtml(data.error || "Error al cargar.")}</p>`; return; }
+    adminState.pendientes = data.pendientes || [];
+    renderListaPendientes();
+  } catch (e) {
+    if (cont) cont.innerHTML = `<p class="text-xs text-red-600">Error de conexión.</p>`;
+  }
+}
+
+function renderListaPendientes() {
+  const cont = document.getElementById("listaPendientes");
+  if (!cont) return;
+  const pendientes = adminState.pendientes || [];
+  if (!pendientes.length) { cont.innerHTML = `<p class="text-xs text-slate-400">No hay registros pendientes de aprobación. 🎉</p>`; return; }
+  cont.innerHTML = pendientes.map(p => `
+    <div class="bg-slate-50 border border-slate-200 rounded-lg p-3">
+      <p class="text-sm font-bold text-slate-800">${escapeHtml(p.nombreEvento)}</p>
+      <p class="text-xs text-slate-500">${escapeHtml(p.fechaSesion)} · Depto ${escapeHtml(p.depto)} · ${escapeHtml(p.nombre)}${p.numAcompanantes > 0 ? ` +${p.numAcompanantes} acomp. (${escapeHtml(p.nombresAcompanantes || "")})` : ""}</p>
+      <p class="text-[11px] font-bold ${p.estadoPago === "Pagado" ? "text-emerald-600" : "text-amber-600"} mt-1">${p.estadoPago === "Pagado" ? "✅ Marcó que ya pagó" : "⏳ Marcó pago pendiente"}</p>
+      ${p.comprobantePago ? `<a href="${p.comprobantePago}" target="_blank" rel="noopener" class="text-[11px] text-brand-600 underline font-bold">Ver comprobante</a>` : `<p class="text-[11px] text-slate-400">Sin comprobante adjunto</p>`}
+      <div class="flex gap-2 mt-2">
+        <button class="btnAprobarReg flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg py-2 transition" data-id="${p.registroId}">✅ Aprobar</button>
+        <button class="btnRechazarReg flex-1 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg py-2 transition" data-id="${p.registroId}">✕ Rechazar</button>
+      </div>
+    </div>
+  `).join("");
+  document.querySelectorAll(".btnAprobarReg").forEach(btn => btn.addEventListener("click", () => accionRegistroAdmin(btn.getAttribute("data-id"), "aprobar")));
+  document.querySelectorAll(".btnRechazarReg").forEach(btn => btn.addEventListener("click", () => accionRegistroAdmin(btn.getAttribute("data-id"), "rechazar")));
+}
+
+async function accionRegistroAdmin(registroId, accion) {
+  const mensaje = accion === "aprobar"
+    ? "¿Confirmas que este pago ya se validó y quieres APROBAR el registro?"
+    : "¿Confirmas RECHAZAR este registro? El lugar quedará libre para otro residente.";
+  if (!confirm(mensaje)) return;
+  try {
+    const url = `${URL_AGENTE_EVENTOS}?accion=${accion === "aprobar" ? "aprobar_registro" : "rechazar_registro"}&pin=${encodeURIComponent(adminState.pin)}&registroId=${encodeURIComponent(registroId)}`;
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json();
+    if (!data.ok) { alert(data.error || "No se pudo procesar."); return; }
+    adminState.pendientes = (adminState.pendientes || []).filter(p => p.registroId !== registroId);
+    renderListaPendientes();
+    refrescarRegistrosYCupos();
+  } catch (e) {
+    alert("Error de conexión.");
+  }
+}
+
+// ---------- Asistencias del mes ----------
+function cambiarMesAsistencia(delta) {
+  const [y, m] = adminState.mesSeleccionado.split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  adminState.mesSeleccionado = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  renderAdminPanel();
+}
+
+async function cargarRegistrosMes() {
+  const cont = document.getElementById("listaAsistenciasMes");
+  if (cont) cont.innerHTML = `<p class="text-xs text-slate-400">Cargando…</p>`;
+  try {
+    const url = `${URL_AGENTE_EVENTOS}?accion=listar_registros_mes&pin=${encodeURIComponent(adminState.pin)}&mes=${encodeURIComponent(adminState.mesSeleccionado)}`;
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json();
+    if (!data.ok) { if (cont) cont.innerHTML = `<p class="text-xs text-red-600">${escapeHtml(data.error || "Error")}</p>`; return; }
+    adminState.registrosMes = data.registros || [];
+    renderListaAsistenciasMes();
+  } catch (e) {
+    if (cont) cont.innerHTML = `<p class="text-xs text-red-600">Error de conexión.</p>`;
+  }
+}
+
+function renderListaAsistenciasMes() {
+  const cont = document.getElementById("listaAsistenciasMes");
+  if (!cont) return;
+  const registros = adminState.registrosMes || [];
+  if (!registros.length) { cont.innerHTML = `<p class="text-xs text-slate-400">No hay registros ese mes.</p>`; return; }
+  cont.innerHTML = registros.map(r => `
+    <div class="bg-slate-50 border border-slate-200 rounded-lg p-3">
+      <p class="text-sm font-bold text-slate-800">${escapeHtml(r.nombreEvento)}</p>
+      <p class="text-xs text-slate-500">${escapeHtml(r.fechaSesion)} · Depto ${escapeHtml(r.depto)} · ${escapeHtml(r.nombre)}${r.numAcompanantes > 0 ? ` +${r.numAcompanantes} acomp.` : ""} · <span class="font-bold">${escapeHtml(r.estado)}</span></p>
+      <div class="flex gap-2 mt-2">
+        <button class="btnAsistioSi flex-1 ${r.asistio === "Si" ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-700"} hover:bg-emerald-600 hover:text-white text-xs font-bold rounded-lg py-2 transition" data-id="${r.registroId}">✅ Asistió</button>
+        <button class="btnAsistioNo flex-1 ${r.asistio === "No" ? "bg-red-600 text-white" : "bg-red-50 text-red-700"} hover:bg-red-600 hover:text-white text-xs font-bold rounded-lg py-2 transition" data-id="${r.registroId}">❌ No asistió</button>
+      </div>
+    </div>
+  `).join("");
+  document.querySelectorAll(".btnAsistioSi").forEach(btn => btn.addEventListener("click", () => marcarAsistenciaAdmin(btn.getAttribute("data-id"), "Si")));
+  document.querySelectorAll(".btnAsistioNo").forEach(btn => btn.addEventListener("click", () => marcarAsistenciaAdmin(btn.getAttribute("data-id"), "No")));
+}
+
+async function marcarAsistenciaAdmin(registroId, asistio) {
+  if (asistio === "No" && !confirm("¿Confirmas que NO asistió y no había cancelado su registro? Esto cuenta como una inasistencia (a la 2ª se bloquea automáticamente).")) return;
+  try {
+    const url = `${URL_AGENTE_EVENTOS}?accion=marcar_asistencia&pin=${encodeURIComponent(adminState.pin)}&registroId=${encodeURIComponent(registroId)}&asistio=${encodeURIComponent(asistio)}`;
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json();
+    if (!data.ok) { alert(data.error || "No se pudo guardar."); return; }
+    const r = (adminState.registrosMes || []).find(x => x.registroId === registroId);
+    if (r) r.asistio = asistio;
+    renderListaAsistenciasMes();
+    if (data.bloqueado) alert("⚠️ Este depto/nombre acumuló 2 inasistencias sin cancelar y fue bloqueado automáticamente para nuevos registros. Puedes desbloquearlo desde \"Ver bloqueados\" si fue un error.");
+  } catch (e) {
+    alert("Error de conexión.");
+  }
+}
+
+// ---------- Bloqueados ----------
+async function cargarBloqueados() {
+  const cont = document.getElementById("listaBloqueados");
+  if (cont) cont.innerHTML = `<p class="text-xs text-slate-400">Cargando…</p>`;
+  try {
+    const url = `${URL_AGENTE_EVENTOS}?accion=listar_bloqueados&pin=${encodeURIComponent(adminState.pin)}`;
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json();
+    if (!data.ok) { if (cont) cont.innerHTML = `<p class="text-xs text-red-600">${escapeHtml(data.error || "Error")}</p>`; return; }
+    adminState.bloqueados = data.bloqueados || [];
+    renderListaBloqueados();
+  } catch (e) {
+    if (cont) cont.innerHTML = `<p class="text-xs text-red-600">Error de conexión.</p>`;
+  }
+}
+
+function renderListaBloqueados() {
+  const cont = document.getElementById("listaBloqueados");
+  if (!cont) return;
+  const bloqueados = adminState.bloqueados || [];
+  if (!bloqueados.length) { cont.innerHTML = `<p class="text-xs text-slate-400">No hay nadie bloqueado actualmente. 🎉</p>`; return; }
+  cont.innerHTML = bloqueados.map(b => `
+    <div class="bg-red-50 border border-red-100 rounded-lg p-3 flex items-center justify-between gap-2">
+      <div>
+        <p class="text-sm font-bold text-slate-800">${escapeHtml(b.nombre)} — Depto ${escapeHtml(b.depto)}</p>
+        <p class="text-[11px] text-slate-500">${escapeHtml(b.motivo)} · desde ${escapeHtml(b.fechaBloqueo)}</p>
+      </div>
+      <button class="btnDesbloquear shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg px-3 py-1.5 transition" data-depto="${escapeHtml(b.depto)}" data-nombre="${escapeHtml(b.nombre)}">Desbloquear</button>
+    </div>
+  `).join("");
+  document.querySelectorAll(".btnDesbloquear").forEach(btn => btn.addEventListener("click", () => desbloquearAdmin(btn.getAttribute("data-depto"), btn.getAttribute("data-nombre"))));
+}
+
+async function desbloquearAdmin(depto, nombre) {
+  if (!confirm(`¿Desbloquear a ${nombre} (depto ${depto}) para que pueda volver a registrarse a eventos?`)) return;
+  try {
+    const url = `${URL_AGENTE_EVENTOS}?accion=desbloquear&pin=${encodeURIComponent(adminState.pin)}&depto=${encodeURIComponent(depto)}&nombre=${encodeURIComponent(nombre)}`;
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json();
+    if (!data.ok) { alert(data.error || "No se pudo desbloquear."); return; }
+    adminState.bloqueados = (adminState.bloqueados || []).filter(b => !(b.depto === depto && normalizarTexto(b.nombre) === normalizarTexto(nombre)));
+    renderListaBloqueados();
+  } catch (e) {
+    alert("Error de conexión.");
   }
 }
 
