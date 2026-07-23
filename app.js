@@ -14,7 +14,7 @@ const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7
 
 // ⚠️ COPIA AQUÍ EL LINK DE IMPLEMENTACIÓN DE TU GOOGLE APPS SCRIPT (APLICACIÓN WEB /EXEC)
 // Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con Gemini.
-const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbx-7aUlJP8S2FoSZ1b4TljZIaEpWdKT_tJoFhXFm0mVce45lt83m7znwhiahPk3DNB2/exec";
+const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycby3PjgEXO1RlrE5ddHox12bXmbaDIpzo6AUaE-lbKEsOXc7CGyv0pksrSEfu82hsLPE/exec";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -591,8 +591,9 @@ function inyectarSubmenuEventos(idContenedor, eventos, categoria, emoji) {
   }
   eventos.forEach(evento => {
     const recurrente = esRecurrente(evento);
-    const badgeTexto = recurrente ? infoCupoResumenRecurrente(evento).texto : cupoInfo(evento, evento.fecha).texto;
-    const badgeLleno = recurrente ? infoCupoResumenRecurrente(evento).lleno : cupoInfo(evento, evento.fecha).lleno;
+    const esImpacto = evento.categoria === "Impacto";
+    const badgeTexto = esImpacto ? "" : (recurrente ? infoCupoResumenRecurrente(evento).texto : cupoInfo(evento, evento.fecha).texto);
+    const badgeLleno = esImpacto ? false : (recurrente ? infoCupoResumenRecurrente(evento).lleno : cupoInfo(evento, evento.fecha).lleno);
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "group relative w-full text-left px-3 py-2 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-lg transition flex items-center justify-between gap-2 font-medium border-l-2 border-transparent hover:border-brand-500";
@@ -619,6 +620,7 @@ function tarjetaEventoTexto(evento, incluirBoton = true, fechaSesion = null) {
   const cfg = CATEGORIAS[evento.categoria];
   const fecha = evento.fecha ? formatearFecha(parseFechaLocal(evento.fecha)) : "Sin fecha";
   const recurrente = esRecurrente(evento);
+  const esImpacto = evento.categoria === "Impacto";
 
   let lineas = [
     `${cfg ? cfg.emoji : "🎟️"} *${evento.nombre}*`,
@@ -628,28 +630,34 @@ function tarjetaEventoTexto(evento, incluirBoton = true, fechaSesion = null) {
   if (!recurrente || fechaSesion) {
     // Evento de un solo día, o una sesión puntual ya elegida (ej. desde el calendario)
     const fechaMostrar = fechaSesion ? formatearFecha(parseFechaLocal(fechaSesion)) : fecha;
-    const info = cupoInfo(evento, fechaSesion || evento.fecha);
-    const badgeCupo = info.sinLimite
-      ? `🟢 *${info.texto}*`
-      : (info.lleno ? "🔴 *Cupo Lleno*" : `🟢 *${info.texto}* (${info.disponibles} disponible${info.disponibles !== 1 ? "s" : ""})`);
     lineas.push(`📅 Fecha: ${fechaMostrar}`);
     lineas.push(`🕐 Horario: ${horarioTexto(evento)}`);
     lineas.push(`📍 Lugar: ${evento.ubicacion || "N/A"}`);
-    lineas.push(`👥 Cupo: ${badgeCupo}`);
+    if (!esImpacto) {
+      const info = cupoInfo(evento, fechaSesion || evento.fecha);
+      const badgeCupo = info.sinLimite
+        ? `🟢 *${info.texto}*`
+        : (info.lleno ? "🔴 *Cupo Lleno*" : `🟢 *${info.texto}* (${info.disponibles} disponible${info.disponibles !== 1 ? "s" : ""})`);
+      lineas.push(`👥 Cupo: ${badgeCupo}`);
+    }
   } else {
     // Evento recurrente sin sesión puntual: se muestra un resumen de próximas sesiones
     lineas.push(`🕐 Horario: ${horarioTexto(evento)}`);
     lineas.push(`📍 Lugar: ${evento.ubicacion || "N/A"}`);
     const proximas = proximasSesionesInfo(evento, 4);
     if (proximas.length) {
-      lineas.push(`👥 *Próximas sesiones y su cupo:*`);
+      lineas.push(esImpacto ? `📅 *Próximas fechas:*` : `👥 *Próximas sesiones y su cupo:*`);
       proximas.forEach(info => {
         const fechaDate = parseFechaLocal(info.fecha);
         const nombreDia = DIAS_SEMANA_LARGOS[fechaDate.getDay()];
-        const badge = info.sinLimite ? "🟢" : (info.lleno ? "🔴" : "🟢");
         const actividad = actividadDelDia(evento, fechaDate);
         const etiquetaActividad = actividad ? ` — ${actividad}` : "";
-        lineas.push(`   ${badge} ${nombreDia.slice(0, 3)} ${formatearFecha(fechaDate)}${etiquetaActividad} — ${info.texto}`);
+        if (esImpacto) {
+          lineas.push(`   📅 ${nombreDia.slice(0, 3)} ${formatearFecha(fechaDate)}${etiquetaActividad}`);
+        } else {
+          const badge = info.sinLimite ? "🟢" : (info.lleno ? "🔴" : "🟢");
+          lineas.push(`   ${badge} ${nombreDia.slice(0, 3)} ${formatearFecha(fechaDate)}${etiquetaActividad} — ${info.texto}`);
+        }
       });
     } else {
       lineas.push(`👥 No hay sesiones futuras dentro del rango de esta serie.`);
@@ -674,7 +682,8 @@ function tarjetaEventoTexto(evento, incluirBoton = true, fechaSesion = null) {
       texto += `\n<button disabled class="mt-2 block text-[11px] font-bold text-slate-400 bg-slate-100 rounded-lg px-3 py-1.5 cursor-not-allowed">Cupo lleno</button>`;
     } else {
       const fechaArg = fechaSesion ? `, '${fechaSesion}'` : "";
-      texto += `\n<button onclick="window.iniciarRegistro('${evento.eventoid}','${evento.categoria}', '${escapeHtml(evento.nombre).replace(/'/g, "\\'")}'${fechaArg})" class="mt-2 block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">✅ Registrarme</button>`;
+      const etiquetaBoton = esImpacto ? "🙋 Quiero apoyar" : "✅ Registrarme";
+      texto += `\n<button onclick="window.iniciarRegistro('${evento.eventoid}','${evento.categoria}', '${escapeHtml(evento.nombre).replace(/'/g, "\\'")}'${fechaArg})" class="mt-2 block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">${etiquetaBoton}</button>`;
     }
   }
   return texto;
@@ -1650,7 +1659,7 @@ function camposFormularioEvento(v) {
         </div>
       </div>
 
-      <div id="wrapperNoImpacto3" class="${esImpactoInicial ? "hidden" : ""} border-t border-slate-100 pt-2.5">
+      <div id="wrapperNoImpacto3" class="border-t border-slate-100 pt-2.5">
         <label class="block text-xs font-bold text-slate-500 mb-1.5">¿Se repite?</label>
         <select id="fTipoRecurrencia" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mb-2">
           <option value="">No, es un evento único</option>
@@ -1709,7 +1718,11 @@ function adjuntarListenersFormularioEvento() {
   const selCategoria = document.getElementById("fCategoria");
   const toggleImpacto = () => {
     const esImpacto = selCategoria.value === "Impacto";
-    ["wrapperNoImpacto1", "wrapperNoImpacto2", "wrapperNoImpacto3"].forEach(id => {
+    // Horario y cupo/costo no aplican a Impacto Comunitario (es informativo y
+    // sin límite de participantes), pero la recurrencia SÍ aplica (ej. jornada
+    // de reciclaje cada domingo) — por eso wrapperNoImpacto3 (recurrencia) NO
+    // se oculta aquí.
+    ["wrapperNoImpacto1", "wrapperNoImpacto2"].forEach(id => {
       document.getElementById(id).classList.toggle("hidden", esImpacto);
     });
     document.getElementById("labelUbicacion").textContent = esImpacto ? "Lugar de recolección" : "Ubicación";
@@ -2143,7 +2156,7 @@ function leerCamposFormularioEvento() {
   const tieneCosto = esImpacto ? false : document.getElementById("fTieneCosto").checked;
   const huellasMaxDepto = esImpacto ? "" : document.getElementById("fHuellasMaxDepto").value.trim();
 
-  const tipoRecurrencia = esImpacto ? "" : document.getElementById("fTipoRecurrencia").value;
+  const tipoRecurrencia = document.getElementById("fTipoRecurrencia").value;
   let diasSemana = "", detalleDias = "", fechaFin = "", recurrenciaDetalle = "";
   if (tipoRecurrencia === "semanal") {
     diasSemana = Array.from(document.querySelectorAll(".fDiaSemana:checked")).map(c => c.value).join(",");
@@ -2163,10 +2176,10 @@ function validarCamposFormularioEvento(f) {
   if (!f.nombre || !f.fecha) return "Nombre y fecha son obligatorios.";
   if (f.categoria !== "Impacto") {
     if (!f.sinCupo && (!f.cupoTotal || Number(f.cupoTotal) <= 0)) return "Indica un cupo total mayor a 0, o marca \"Sin límite de cupo\".";
-    if (f.tipoRecurrencia === "semanal" && !f.diasSemana) return "Marca al menos un día de la semana para la repetición semanal.";
-    if (f.tipoRecurrencia && !f.fechaFin) return "Marcaste que se repite: indica la fecha fin de la serie.";
-    if (f.tipoRecurrencia && f.fechaFin < f.fecha) return "La fecha fin no puede ser anterior a la fecha de inicio.";
   }
+  if (f.tipoRecurrencia === "semanal" && !f.diasSemana) return "Marca al menos un día de la semana para la repetición semanal.";
+  if (f.tipoRecurrencia && !f.fechaFin) return "Marcaste que se repite: indica la fecha fin de la serie.";
+  if (f.tipoRecurrencia && f.fechaFin < f.fecha) return "La fecha fin no puede ser anterior a la fecha de inicio.";
   return null;
 }
 
@@ -2659,6 +2672,7 @@ function estadoInicialRegModal() {
     fotoMime: null,
     fotoNombre: null,
     aceptaTerminos: false,
+    estadoPago: null,
     mostrandoConfirmacion: false,
     errorFormulario: null,
     huellasInfo: null,
@@ -2719,6 +2733,10 @@ function seleccionarEventoDesdeLista(evento) {
   regModal.fechaUnica = null;
   regModal.fechasDisponiblesMes = esRecurrente(evento) ? ocurrenciasDelMesActual(evento).map(f => fechaISO(f)) : [];
   regModal.fechasSeleccionadas = [];
+  regModal.estadoPago = null;
+  regModal.fotoBase64 = null;
+  regModal.fotoMime = null;
+  regModal.fotoNombre = null;
   if (deptoRecordado && !regModal.depto) regModal.depto = deptoRecordado;
   if (nombreRecordado && !regModal.nombreAsistente) regModal.nombreAsistente = nombreRecordado;
   regModal.paso = "formulario";
@@ -2828,7 +2846,7 @@ function renderModalEventoRegistro() {
       detalleHtml = `<p class="text-xs text-slate-600 mb-2">${escapeHtml(data.mensaje || "")}</p>`;
     }
     body.innerHTML = `
-      <p class="text-sm font-bold text-emerald-700 mb-2">✅ ¡Registro confirmado!</p>
+      <p class="text-sm font-bold text-emerald-700 mb-2">${regModal.evento && regModal.evento.categoria === "Impacto" ? "🙋 ¡Gracias por tu apoyo!" : "✅ ¡Registro confirmado!"}</p>
       ${detalleHtml}
       <div class="space-y-2 mt-3">
         <button id="regBtnOtroEvento" class="w-full bg-brand-600 hover:bg-brand-700 text-white text-sm font-bold rounded-lg py-2.5 transition">Registrarme a otro evento</button>
@@ -2845,7 +2863,7 @@ function renderModalEventoRegistro() {
   // ---- Verificación de identidad (depto + nombre) ----
   if (regModal.paso === "verificar_identidad") {
     body.innerHTML = `
-      <p class="text-sm text-slate-600 mb-3">Para ver o modificar tus registros, confírmanos con quién te registraste (así evitamos que alguien más los consulte o cancele):</p>
+      <p class="text-sm text-slate-600 mb-3">Para ver o modificar tus registros, confírmanos con quién te registraste (así evitamos que alguien más los consulte o cancele). Escribe el nombre <strong>exactamente igual</strong> a como lo pusiste al registrarte:</p>
       <div class="space-y-2.5">
         <div>
           <label class="block text-xs font-bold text-slate-500 mb-1">Número de departamento</label>
@@ -2881,7 +2899,12 @@ function renderModalEventoRegistro() {
     `;
     const cont = document.getElementById("regListaRegistros");
     if (!registros.length) {
-      cont.innerHTML = `<p class="text-xs text-slate-400">No se encontraron registros futuros con esos datos.</p>`;
+      cont.innerHTML = `
+        <p class="text-xs text-slate-500 mb-2">No se encontraron registros futuros con esos datos.</p>
+        <p class="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+          💡 Verifica que el <strong>nombre esté completo y escrito EXACTAMENTE igual</strong> a como lo pusiste al registrarte (mismo orden, sin abreviar). Si te registraste como "Juan Pérez López", buscar solo "Juan Pérez" no lo va a encontrar. También confirma el número de depto.
+        </p>
+      `;
     } else {
       registros.forEach(r => {
         const cfg = CATEGORIAS[r.categoria];
@@ -2912,14 +2935,23 @@ function renderModalEventoRegistro() {
         <p><strong>Fecha:</strong> ${formatearFecha(fechaDate)}</p>
         <p><strong>Asistente:</strong> ${escapeHtml(r.nombre)}</p>
         <p><strong>Acompañantes:</strong> ${r.numAcompanantes || 0}${r.nombresAcompanantes ? " — " + escapeHtml(r.nombresAcompanantes) : ""}</p>
-        ${r.comprobantePago ? `<p><a href="${r.comprobantePago}" target="_blank" rel="noopener" class="text-brand-600 underline font-bold">Ver comprobante subido</a></p>` : ""}
+        <p><strong>Estado:</strong> ${escapeHtml(r.estado)}${r.tieneCosto ? ` · Pago: ${r.estadoPago === "Pagado" ? "Pagado" : "Pendiente"}` : ""}</p>
+        ${r.comprobantePago ? `<p><a href="${r.comprobantePago}" target="_blank" rel="noopener" class="text-brand-600 underline font-bold">Ver comprobante subido</a></p>` : (r.tieneCosto ? `<p class="text-amber-600 font-bold">Sin comprobante adjunto todavía</p>` : "")}
       </div>
       <div class="space-y-2">
+        ${r.tieneCosto ? `<button id="regBtnSubirComprobante" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg py-2.5 transition">💳 ${r.comprobantePago ? "Actualizar" : "Subir"} comprobante de pago</button>` : ""}
         <button id="regBtnEditarAcomp" class="w-full bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold rounded-lg py-2.5 transition">✏️ Modificar acompañantes</button>
         <button id="regBtnCancelarRegistro" class="w-full bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-lg py-2.5 transition">🗑️ Cancelar este registro</button>
         <button id="regBtnVolverLista2" class="w-full bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-lg py-2 transition">← Volver a mis registros</button>
       </div>
     `;
+    const btnComprobante = document.getElementById("regBtnSubirComprobante");
+    if (btnComprobante) btnComprobante.addEventListener("click", () => {
+      regModal.fotoBase64 = null; regModal.fotoMime = null; regModal.fotoNombre = null;
+      regModal.errorFormulario = null;
+      regModal.paso = "subir_comprobante";
+      renderModalEventoRegistro();
+    });
     document.getElementById("regBtnEditarAcomp").addEventListener("click", () => {
       regModal.nuevoNumAcomp = r.numAcompanantes || 0;
       regModal.nuevosNombresAcomp = r.nombresAcompanantes || "";
@@ -2929,6 +2961,38 @@ function renderModalEventoRegistro() {
     });
     document.getElementById("regBtnCancelarRegistro").addEventListener("click", () => { regModal.paso = "confirmar_cancelacion"; renderModalEventoRegistro(); });
     document.getElementById("regBtnVolverLista2").addEventListener("click", () => { regModal.paso = "lista_registros"; renderModalEventoRegistro(); });
+    return;
+  }
+
+  // ---- Subir/actualizar comprobante de pago de un registro existente ----
+  if (regModal.paso === "subir_comprobante") {
+    const r = regModal.registroSeleccionado;
+    body.innerHTML = `
+      <p class="text-sm font-bold text-slate-800 mb-2">Comprobante de pago — ${escapeHtml(r.nombreEvento)}</p>
+      <div>
+        <label class="block text-xs font-bold text-slate-500 mb-1">Foto del comprobante</label>
+        <input id="regFotoExistente" type="file" accept="image/*" class="w-full text-xs">
+        ${regModal.fotoBase64 ? `<p class="text-[11px] text-emerald-600 font-bold mt-1">✅ Foto cargada (${escapeHtml(regModal.fotoNombre || "")})</p>` : ""}
+      </div>
+      <p class="text-[10px] text-slate-400 mt-1">Al subirlo, tu registro se marca como "Ya pagué" para que el Comité lo revise y apruebe.</p>
+      ${regModal.errorFormulario ? `<p class="text-xs font-bold text-red-600 mt-2">⚠️ ${escapeHtml(regModal.errorFormulario)}</p>` : ""}
+      <div class="flex gap-2 mt-3">
+        <button id="regBtnVolverDetalleComp" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg py-2.5 transition">← Volver</button>
+        <button id="regBtnGuardarComprobante" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg py-2.5 transition">${regModal.enviando ? "Subiendo…" : "Guardar comprobante"}</button>
+      </div>
+    `;
+    document.getElementById("regFotoExistente").addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      regModal.fotoBase64 = await leerArchivoComoBase64(file);
+      regModal.fotoMime = file.type;
+      regModal.fotoNombre = file.name;
+      renderModalEventoRegistro();
+    });
+    document.getElementById("regBtnVolverDetalleComp").addEventListener("click", () => { regModal.paso = "detalle_registro"; renderModalEventoRegistro(); });
+    const btnGuardarComp = document.getElementById("regBtnGuardarComprobante");
+    btnGuardarComp.disabled = regModal.enviando;
+    btnGuardarComp.addEventListener("click", guardarComprobanteExistente);
     return;
   }
 
@@ -3069,9 +3133,21 @@ function renderFormularioEvento() {
       ${huellasInfoHtml}
       ${ev.tienecosto ? `
       <div>
-        <label class="block text-xs font-bold text-slate-500 mb-1">Comprobante de pago (foto, opcional)</label>
+        <label class="block text-xs font-bold text-slate-500 mb-1">¿Ya realizaste el pago?</label>
+        <div class="flex gap-2">
+          <label class="flex-1 flex items-center justify-center gap-1.5 text-xs font-bold border rounded-lg px-3 py-2 cursor-pointer transition ${regModal.estadoPago === "pagado" ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-600"}">
+            <input type="radio" name="regEstadoPago" value="pagado" class="regEstadoPagoInput" ${regModal.estadoPago === "pagado" ? "checked" : ""}> Ya pagué
+          </label>
+          <label class="flex-1 flex items-center justify-center gap-1.5 text-xs font-bold border rounded-lg px-3 py-2 cursor-pointer transition ${regModal.estadoPago === "pendiente" ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-600"}">
+            <input type="radio" name="regEstadoPago" value="pendiente" class="regEstadoPagoInput" ${regModal.estadoPago === "pendiente" ? "checked" : ""}> Pago pendiente
+          </label>
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-500 mb-1">Comprobante de pago (foto)${regModal.estadoPago === "pagado" ? "" : " — opcional"}</label>
         <input id="regFoto" type="file" accept="image/*" class="w-full text-xs">
         ${regModal.fotoBase64 ? `<p class="text-[11px] text-emerald-600 font-bold mt-1">✅ Foto cargada (${escapeHtml(regModal.fotoNombre || "")})</p>` : ""}
+        ${regModal.estadoPago === "pendiente" ? `<p class="text-[10px] text-slate-400 mt-1">Puedes subirlo más tarde desde "Mis Registros / Cancelar" en cuanto hagas el pago. Mientras tanto tu registro queda como Pendiente hasta que el Comité lo revise.</p>` : ""}
       </div>` : ""}
       <div>
         <label class="flex items-start gap-2 text-[11px] text-slate-600 cursor-pointer">
@@ -3101,6 +3177,10 @@ function renderFormularioEvento() {
   const nombresAcompInput = document.getElementById("regNombresAcomp");
   if (nombresAcompInput) nombresAcompInput.addEventListener("input", (e) => regModal.nombresAcompanantes = e.target.value);
   document.getElementById("regAcepta").addEventListener("change", (e) => regModal.aceptaTerminos = e.target.checked);
+
+  document.querySelectorAll(".regEstadoPagoInput").forEach(radio => {
+    radio.addEventListener("change", (e) => { regModal.estadoPago = e.target.value; renderFormularioEvento(); });
+  });
 
   const fotoInput = document.getElementById("regFoto");
   if (fotoInput) {
@@ -3144,7 +3224,8 @@ function renderFormularioEvento() {
     if (!regModal.nombreAsistente || regModal.nombreAsistente.trim().length < 3) { regModal.errorFormulario = "Indica el nombre completo del asistente."; renderFormularioEvento(); return; }
     if (regModal.tieneAcompanantes && regModal.numAcompanantes > 0 && !regModal.nombresAcompanantes.trim()) { regModal.errorFormulario = "Indica el/los nombre(s) de tus acompañantes."; renderFormularioEvento(); return; }
     if (recurrenteSinFecha && !regModal.fechasSeleccionadas.length) { regModal.errorFormulario = "Marca al menos una fecha para registrarte."; renderFormularioEvento(); return; }
-    // El comprobante de pago es opcional — no bloquea el registro aunque el evento tenga costo.
+    if (ev.tienecosto && !regModal.estadoPago) { regModal.errorFormulario = "Indica si ya realizaste el pago o está pendiente."; renderFormularioEvento(); return; }
+    if (ev.tienecosto && regModal.estadoPago === "pagado" && !regModal.fotoBase64) { regModal.errorFormulario = "Marcaste que ya pagaste: adjunta tu comprobante de pago para continuar."; renderFormularioEvento(); return; }
     if (!regModal.aceptaTerminos) { regModal.errorFormulario = "Debes aceptar el aviso de responsabilidad para continuar."; renderFormularioEvento(); return; }
     regModal.mostrandoConfirmacion = true;
     renderModalEventoRegistro();
@@ -3159,19 +3240,20 @@ function renderConfirmacionRegistro() {
   const fechasTexto = fechas.map(f => formatearFecha(parseFechaLocal(f))).join(", ");
 
   body.innerHTML = `
-    <p class="text-sm font-bold text-slate-800 mb-2">Confirma tu registro:</p>
+    <p class="text-sm font-bold text-slate-800 mb-2">${ev.categoria === "Impacto" ? "Confirma tu apoyo:" : "Confirma tu registro:"}</p>
     <div class="bg-slate-50 border border-slate-100 rounded-lg p-3 mb-3 text-xs text-slate-700 space-y-1">
       <p><strong>Evento:</strong> ${escapeHtml(ev.nombre)}</p>
       <p><strong>Fecha(s):</strong> ${fechasTexto}</p>
       <p><strong>Depto:</strong> ${escapeHtml(regModal.depto)}</p>
-      <p><strong>Asistente:</strong> ${escapeHtml(regModal.nombreAsistente)}</p>
+      <p><strong>${ev.categoria === "Impacto" ? "Participante" : "Asistente"}:</strong> ${escapeHtml(regModal.nombreAsistente)}</p>
       ${regModal.numAcompanantes > 0 ? `<p><strong>Acompañantes:</strong> ${regModal.numAcompanantes} — ${escapeHtml(regModal.nombresAcompanantes || "")}</p>` : ""}
+      ${ev.tienecosto ? `<p><strong>Pago:</strong> ${regModal.estadoPago === "pagado" ? "Ya pagué" : "Pendiente de pagar"}</p>` : ""}
       ${ev.tienecosto ? `<p><strong>Comprobante:</strong> ${regModal.fotoBase64 ? "Adjuntado ✅" : "No adjuntado (opcional)"}</p>` : ""}
     </div>
     ${regModal.errorFormulario ? `<p class="text-xs font-bold text-red-600 mb-2">⚠️ ${escapeHtml(regModal.errorFormulario)}</p>` : ""}
     <div class="flex gap-2">
       <button id="regBtnVolverEditar" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg py-2.5 transition">← Editar</button>
-      <button id="regBtnConfirmarEnvio" class="flex-1 bg-brand-600 hover:bg-brand-700 text-white text-sm font-bold rounded-lg py-2.5 transition">${regModal.enviando ? "Enviando…" : "✅ Confirmar registro"}</button>
+      <button id="regBtnConfirmarEnvio" class="flex-1 bg-brand-600 hover:bg-brand-700 text-white text-sm font-bold rounded-lg py-2.5 transition">${regModal.enviando ? "Enviando…" : (ev.categoria === "Impacto" ? "🙋 Confirmar apoyo" : "✅ Confirmar registro")}</button>
     </div>
   `;
   document.getElementById("regBtnVolverEditar").addEventListener("click", () => { regModal.mostrandoConfirmacion = false; renderModalEventoRegistro(); });
@@ -3195,7 +3277,8 @@ async function enviarRegistroModal() {
     nombre: regModal.nombreAsistente,
     numAcompanantes: regModal.numAcompanantes,
     nombresAcompanantes: regModal.nombresAcompanantes,
-    aceptaTerminos: regModal.aceptaTerminos ? "1" : "0"
+    aceptaTerminos: regModal.aceptaTerminos ? "1" : "0",
+    estadoPago: regModal.estadoPago || ""
   };
   if (fechas.length === 1) payload.fechaSesion = fechas[0];
   else payload.fechasSesion = fechas.join(",");
@@ -3261,6 +3344,43 @@ async function buscarMisRegistrosModal() {
   } catch (e) {
     regModal.buscando = false;
     regModal.errorVerificacion = "Error de conexión. Intenta de nuevo.";
+    renderModalEventoRegistro();
+  }
+}
+
+async function guardarComprobanteExistente() {
+  const r = regModal.registroSeleccionado;
+  regModal.errorFormulario = null;
+  if (!regModal.fotoBase64) { regModal.errorFormulario = "Selecciona la foto del comprobante primero."; renderModalEventoRegistro(); return; }
+  regModal.enviando = true;
+  renderModalEventoRegistro();
+  try {
+    const res = await fetch(URL_AGENTE_EVENTOS, {
+      method: "POST",
+      body: JSON.stringify({
+        accion: "modificar_registro",
+        registroId: r.registroId,
+        depto: regModal.deptoConsulta,
+        nombre: regModal.nombreConsulta,
+        numAcompanantes: r.numAcompanantes || 0,
+        nombresAcompanantes: r.nombresAcompanantes || "",
+        fotoBase64: regModal.fotoBase64,
+        fotoMime: regModal.fotoMime,
+        fotoNombre: regModal.fotoNombre,
+        estadoPago: "Pagado"
+      })
+    });
+    const data = await res.json();
+    regModal.enviando = false;
+    if (!data.ok) { regModal.errorFormulario = data.error || "No se pudo subir el comprobante."; renderModalEventoRegistro(); return; }
+    r.comprobantePago = data.comprobantePago || r.comprobantePago;
+    r.estadoPago = data.estadoPago || "Pagado";
+    regModal.fotoBase64 = null; regModal.fotoMime = null; regModal.fotoNombre = null;
+    regModal.paso = "detalle_registro";
+    renderModalEventoRegistro();
+  } catch (e) {
+    regModal.enviando = false;
+    regModal.errorFormulario = "Error de conexión al subir el comprobante.";
     renderModalEventoRegistro();
   }
 }
