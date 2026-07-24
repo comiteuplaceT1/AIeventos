@@ -3570,7 +3570,7 @@ function renderModalFeedback() {
 
   if (feedbackState.paso === "formulario") {
     body.innerHTML = `
-      <p class="text-sm text-slate-600 mb-3">Escríbele al Comité — puede ser una duda, un comentario o una recomendación sobre el edificio o los eventos.</p>
+      <p class="text-sm text-slate-600 mb-3">Escríbele al Comité — puede ser una duda, un comentario o una recomendación sobre los eventos.</p>
       <div class="space-y-2.5">
         <div>
           <label class="block text-xs font-bold text-slate-500 mb-1">Número de departamento</label>
