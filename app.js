@@ -596,14 +596,16 @@ function inyectarSubmenuEventos(idContenedor, eventos, categoria, emoji) {
     const badgeLleno = esImpacto ? false : (recurrente ? infoCupoResumenRecurrente(evento).lleno : cupoInfo(evento, evento.fecha).lleno);
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "group relative w-full text-left px-3 py-2 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-lg transition flex items-center justify-between gap-2 font-medium border-l-2 border-transparent hover:border-brand-500";
-    btn.innerHTML = `<span class="truncate">${emoji} ${escapeHtml(evento.nombre)}</span><span class="text-[10px] font-bold ${badgeLleno ? 'text-red-500' : 'text-emerald-600'} shrink-0">${badgeTexto}</span>
-      <span class="pointer-events-none absolute left-1 right-1 bottom-[calc(100%+6px)] z-50 hidden group-hover:flex justify-center">
-        <span class="relative max-w-[240px] bg-slate-900 text-white text-[11px] font-semibold leading-snug text-center rounded-lg px-2.5 py-1.5 shadow-lg whitespace-normal break-words">
-          ${escapeHtml(evento.nombre)}
-          <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900"></span>
-        </span>
-      </span>`;
+    // Antes el nombre iba en una sola línea con "truncate" + un tooltip que solo
+    // aparecía con :hover — en móvil no hay hover, así que un nombre largo
+    // quedaba cortado sin forma de leerlo completo. Ahora el nombre va en su
+    // propia línea, se envuelve a 2+ líneas si hace falta, y el cupo queda
+    // debajo — se lee completo en cualquier tamaño de pantalla.
+    btn.className = "group relative w-full text-left px-3 py-2 rounded-lg transition font-medium border-l-2 border-transparent hover:bg-slate-50 hover:border-brand-500";
+    btn.innerHTML = `
+      <span class="block text-sm text-slate-700 group-hover:text-slate-900 leading-snug break-words">${emoji} ${escapeHtml(evento.nombre)}</span>
+      ${badgeTexto ? `<span class="block mt-0.5 text-[10px] font-bold ${badgeLleno ? 'text-red-500' : 'text-emerald-600'}">${badgeTexto}</span>` : ""}
+    `;
     btn.title = evento.nombre;
     btn.onclick = () => mostrarTarjetaEventoEnChat(evento);
     contenedor.appendChild(btn);
@@ -1298,7 +1300,7 @@ function tipSiguientePaso() {
 // registros y cancelar. Se usan en el mensaje de bienvenida, en "ayuda" y como pie
 // de casi todas las respuestas informativas (tipSiguientePaso).
 function mensajeBotonesBienvenida() {
-  return `<button onclick="window.abrirModalEventoRegistro('menu')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-brand-700 hover:bg-brand-800 rounded-lg px-3 py-1.5 transition">🎟️ Registrarme a Evento</button>`
+  return `<button onclick="window.abrirModalEventoRegistro('menu')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-brand-700 hover:bg-brand-800 rounded-lg px-3 py-1.5 transition">🎟️ Gestionar Eventos</button>`
     + `<button onclick="window.handleQuickAction('Ver eventos de hoy')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">🎈 Eventos de hoy</button>`
     + `<button onclick="window.handleQuickAction('Ver eventos de la semana')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg px-3 py-1.5 transition">📅 Eventos de la Semana</button>`
     + `<button onclick="window.abrirModalCalendario()" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg px-3 py-1.5 transition">📆 Calendario Mensual</button>`
@@ -1477,7 +1479,7 @@ function responderMensajeLocal(textoOriginal) {
   if (categoriaDetectada) return respuestaPorCategoria(categoriaDetectada);
 
   if (normalizado.includes("ayuda") || normalizado === "hola") {
-    return `👋 ¡Hola! Esto es lo que puedo hacer por ti:\n\n🎟️ *Registrarme a Evento* — botón de abajo, para registrarte, consultar o cancelar tus registros\n🎈 *"Eventos de hoy"* — qué hay programado hoy\n📅 *"Eventos de la Semana"* — agenda completa de lunes a domingo\n🔍 El *nombre de un evento* (ej. "días y horario de Zumba") — para ver cupo, fecha y horario\n\n📂 También puedes explorar el menú de la izquierda por categoría para ver el detalle completo de cualquier evento.\n\n¿Con cuál empezamos?` + "\n\n" + mensajeBotonesBienvenida();
+    return `👋 ¡Hola! Esto es lo que puedo hacer por ti:\n\n🎟️ *Gestionar Eventos* — botón de abajo, para registrarte, consultar o cancelar tus registros\n🎈 *"Eventos de hoy"* — qué hay programado hoy\n📅 *"Eventos de la Semana"* — agenda completa de lunes a domingo\n🔍 El *nombre de un evento* (ej. "días y horario de Zumba") — para ver cupo, fecha y horario\n\n📂 También puedes explorar el menú de la izquierda por categoría para ver el detalle completo de cualquier evento.\n\n¿Con cuál empezamos?` + "\n\n" + mensajeBotonesBienvenida();
   }
 
   return null; // sin match local (o mención del evento sin intención operativa) -> se consulta a la IA
@@ -1527,7 +1529,7 @@ async function procesarMensajeUsuario(txt) {
     return;
   }
 
-  const respuestaSinMatch = `🤔 No pude generarte una respuesta para eso ahora mismo. Puedo ayudarte con:\n\n🎟️ *Registrarme a Evento* — para registrarte, consultar o cancelar\n🎈 *"Eventos de hoy"* — qué hay programado hoy\n📅 *"Eventos de la Semana"* — agenda completa\n🔍 El *nombre de un evento* (ej. "días y horario de Zumba")\n\n📂 También puedes usar el menú de la izquierda por categoría.\n\n¿Qué te gustaría hacer?` + "\n\n" + mensajeBotonesBienvenida();
+  const respuestaSinMatch = `🤔 No pude generarte una respuesta para eso ahora mismo. Puedo ayudarte con:\n\n🎟️ *Gestionar Eventos* — para registrarte, consultar o cancelar\n🎈 *"Eventos de hoy"* — qué hay programado hoy\n📅 *"Eventos de la Semana"* — agenda completa\n🔍 El *nombre de un evento* (ej. "días y horario de Zumba")\n\n📂 También puedes usar el menú de la izquierda por categoría.\n\n¿Qué te gustaría hacer?` + "\n\n" + mensajeBotonesBienvenida();
   addMessage(respuestaSinMatch, "bot");
 }
 
@@ -2766,6 +2768,19 @@ function leerArchivoComoBase64(file) {
 function renderModalEventoRegistro() {
   const body = document.getElementById("regBody");
   if (!body || !regModal) return;
+
+  const titulo = document.getElementById("modalEventoRegistroTitulo");
+  if (titulo) {
+    const pasosDeConsulta = ["verificar_identidad", "lista_registros", "detalle_registro", "editar_acompanantes", "confirmar_edicion", "confirmar_cancelacion", "subir_comprobante"];
+    const pasosDeRegistro = ["categorias", "lista_eventos", "formulario"];
+    if (pasosDeConsulta.includes(regModal.paso)) {
+      titulo.textContent = "📋 Mis Registros";
+    } else if (pasosDeRegistro.includes(regModal.paso)) {
+      titulo.textContent = "✅ Registrarme a Evento";
+    } else {
+      titulo.textContent = "🎟️ Gestionar Eventos";
+    }
+  }
 
   // ---- Menú principal ----
   if (regModal.paso === "menu") {
