@@ -6,7 +6,7 @@
 
 // ⚠️ REEMPLAZA ESTOS LINKS ENTRE COMILLAS POR TUS ENLACES REALES DE GOOGLE SHEETS (CSV)
 // Publica cada pestaña por separado: Archivo > Compartir > Publicar en la web > [pestaña] > CSV
-const URL_DEPORTIVOS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7e_v2ttLAYViX9W9bJ-eD_udPwdOgnBXriDz3bRpQEGMwmLTpA_oUXLOAORVieHG8KMYUoLyFVx/pub?gid=1330295260&single=true&output=csv";
+const URL_DEPORTIVOS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7e_v2ttLAYViX9W9bJ-eD_udPwdOgnBXriDz3bRpQEGMwmLTpA_oUXLOAORVieHG8KMYUoLyFVx/pub?gid=0&single=true&output=csv";
 const URL_SOCIALES_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7e_v2ttLAYViX9W9bJ-eD_udPwdOgnBXriDz3bRpQEGMwmLTpA_oUXLOAORVieHG8KMYUoLyFVx/pub?gid=1456759375&single=true&output=csv";
 const URL_CULTURALES_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7e_v2ttLAYViX9W9bJ-eD_udPwdOgnBXriDz3bRpQEGMwmLTpA_oUXLOAORVieHG8KMYUoLyFVx/pub?gid=433908363&single=true&output=csv";
 const URL_IMPACTO_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7e_v2ttLAYViX9W9bJ-eD_udPwdOgnBXriDz3bRpQEGMwmLTpA_oUXLOAORVieHG8KMYUoLyFVx/pub?gid=1748806311&single=true&output=csv";
@@ -14,7 +14,7 @@ const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7
 
 // ⚠️ COPIA AQUÍ EL LINK DE IMPLEMENTACIÓN DE TU GOOGLE APPS SCRIPT (APLICACIÓN WEB /EXEC)
 // Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con Gemini.
-const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycby3PjgEXO1RlrE5ddHox12bXmbaDIpzo6AUaE-lbKEsOXc7CGyv0pksrSEfu82hsLPE/exec";
+const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbxcVPp91IUcGUgELaAv3l0S1d2YqbxIsc-cZPVh_pkVCIepOj2rn9e1DJHDaE_OGXwo/exec";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -231,8 +231,12 @@ function contarConfirmados(eventoId, fechaSesion) {
 // de un solo día, fechaSesion normalmente es evento.fecha.
 function cupoInfo(evento, fechaSesion) {
   const fecha = fechaSesion || evento.fecha;
+  // Impacto Comunitario NUNCA tiene límite de cupo, sin importar qué haya (o no)
+  // en la celda CupoTotal del Sheet — así evitamos que un valor viejo (de antes
+  // de que esta categoría dejara de usar cupo) bloquee el registro de apoyo.
+  const esImpacto = evento.categoria === "Impacto";
   const cupoRaw = (evento.cupototal || "").toString().trim().toLowerCase();
-  const sinLimite = cupoRaw === "" || cupoRaw === "sin límite" || cupoRaw === "sin limite";
+  const sinLimite = esImpacto || cupoRaw === "" || cupoRaw === "sin límite" || cupoRaw === "sin limite";
   const confirmados = contarConfirmados(evento.eventoid, fecha);
 
   if (sinLimite) {
@@ -243,7 +247,9 @@ function cupoInfo(evento, fechaSesion) {
       lleno: false,
       sinLimite: true,
       fecha,
-      texto: `Sin límite (${confirmados} registrado${confirmados !== 1 ? "s" : ""})`
+      texto: esImpacto
+        ? `${confirmados} apoyo${confirmados !== 1 ? "s" : ""} hasta ahora`
+        : `Sin límite (${confirmados} registrado${confirmados !== 1 ? "s" : ""})`
     };
   }
 
@@ -613,7 +619,7 @@ function inyectarSubmenuEventos(idContenedor, eventos, categoria, emoji) {
 }
 
 function horarioTexto(evento) {
-  if (!evento.horainicio && !evento.horafin) return "Por confirmar";
+  if (!evento.horainicio && !evento.horafin) return "Durante todo el día";
   return `${evento.horainicio || "N/A"} - ${evento.horafin || "N/A"}`;
 }
 
@@ -1479,7 +1485,7 @@ function responderMensajeLocal(textoOriginal) {
   if (categoriaDetectada) return respuestaPorCategoria(categoriaDetectada);
 
   if (normalizado.includes("ayuda") || normalizado === "hola") {
-    return `👋 ¡Hola! Esto es lo que puedo hacer por ti:\n\n🎟️ *Gestionar Eventos* — botón de abajo, para registrarte, consultar o cancelar tus registros\n🎈 *"Eventos de hoy"* — qué hay programado hoy\n📅 *"Eventos de la Semana"* — agenda completa de lunes a domingo\n🔍 El *nombre de un evento* (ej. "días y horario de Zumba") — para ver cupo, fecha y horario\n\n📂 También puedes explorar el menú de la izquierda por categoría para ver el detalle completo de cualquier evento.\n\n¿Con cuál empezamos?` + "\n\n" + mensajeBotonesBienvenida();
+    return `👋 ¡Hola! Esto es lo que puedo hacer por ti:\n\n🎟️ *Gestionar Eventos* — botón de abajo, para registrarte, consultar o cancelar tus registros\n📂 Menú de la izquierda por categoría — en el celular, ábrelo con el ícono ☰ de arriba a la izquierda\n🎈 *"Eventos de hoy"* — qué hay programado hoy\n📅 *"Eventos de la Semana"* — agenda completa de lunes a domingo\n🔍 El *nombre de un evento* (ej. "días y horario de Zumba") — para ver cupo, fecha y horario\n🚫 Si tu depto tiene adeudos con la administración, no podrás registrarte a eventos\n⚠️ 2 inasistencias sin cancelar a tiempo y el sistema puede bloquear tus nuevos registros\n\n¿Con cuál empezamos?` + "\n\n" + mensajeBotonesBienvenida();
   }
 
   return null; // sin match local (o mención del evento sin intención operativa) -> se consulta a la IA
