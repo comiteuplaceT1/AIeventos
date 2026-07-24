@@ -6,7 +6,7 @@
 
 // ⚠️ REEMPLAZA ESTOS LINKS ENTRE COMILLAS POR TUS ENLACES REALES DE GOOGLE SHEETS (CSV)
 // Publica cada pestaña por separado: Archivo > Compartir > Publicar en la web > [pestaña] > CSV
-const URL_DEPORTIVOS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7e_v2ttLAYViX9W9bJ-eD_udPwdOgnBXriDz3bRpQEGMwmLTpA_oUXLOAORVieHG8KMYUoLyFVx/pub?gid=0&single=true&output=csv";
+const URL_DEPORTIVOS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7e_v2ttLAYViX9W9bJ-eD_udPwdOgnBXriDz3bRpQEGMwmLTpA_oUXLOAORVieHG8KMYUoLyFVx/pub?gid=1330295260&single=true&output=csv";
 const URL_SOCIALES_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7e_v2ttLAYViX9W9bJ-eD_udPwdOgnBXriDz3bRpQEGMwmLTpA_oUXLOAORVieHG8KMYUoLyFVx/pub?gid=1456759375&single=true&output=csv";
 const URL_CULTURALES_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7e_v2ttLAYViX9W9bJ-eD_udPwdOgnBXriDz3bRpQEGMwmLTpA_oUXLOAORVieHG8KMYUoLyFVx/pub?gid=433908363&single=true&output=csv";
 const URL_IMPACTO_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7e_v2ttLAYViX9W9bJ-eD_udPwdOgnBXriDz3bRpQEGMwmLTpA_oUXLOAORVieHG8KMYUoLyFVx/pub?gid=1748806311&single=true&output=csv";
@@ -1310,11 +1310,11 @@ function tipSiguientePaso() {
 // registros y cancelar. Se usan en el mensaje de bienvenida, en "ayuda" y como pie
 // de casi todas las respuestas informativas (tipSiguientePaso).
 function mensajeBotonesBienvenida() {
-  return `<button onclick="window.abrirModalEventoRegistro('menu')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-brand-700 hover:bg-brand-800 rounded-lg px-3 py-1.5 transition">🎟️ Gestionar Eventos</button>`
-    + `<button onclick="window.handleQuickAction('Ver eventos de hoy')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 transition">🎈 Eventos de hoy</button>`
-    + `<button onclick="window.handleQuickAction('Ver eventos de la semana')" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg px-3 py-1.5 transition">📅 Eventos de la Semana</button>`
-    + `<button onclick="window.abrirModalCalendario()" class="mr-1 mb-1.5 inline-block text-[11px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg px-3 py-1.5 transition">📆 Calendario Mensual</button>`
-    + `<button onclick="window.abrirModalEventoRegistro('verificar_identidad')" class="mb-1.5 inline-block text-[11px] font-bold text-white bg-violet-600 hover:bg-violet-700 rounded-lg px-3 py-1.5 transition">📋 Mis Registros / Cancelar</button>`;
+  return `<button onclick="window.abrirModalEventoRegistro('menu')" class="block w-full mb-1.5 text-[13px] font-bold text-white bg-brand-700 hover:bg-brand-800 rounded-lg px-3 py-2 transition text-center">🎟️ Gestionar Eventos</button>`
+    + `<button onclick="window.handleQuickAction('Ver eventos de hoy')" class="block w-full mb-1.5 text-[13px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-2 transition text-center">🎈 Eventos de hoy</button>`
+    + `<button onclick="window.handleQuickAction('Ver eventos de la semana')" class="block w-full mb-1.5 text-[13px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg px-3 py-2 transition text-center">📅 Eventos de la Semana</button>`
+    + `<button onclick="window.abrirModalCalendario()" class="block w-full mb-1.5 text-[13px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg px-3 py-2 transition text-center">📆 Calendario Mensual</button>`
+    + `<button onclick="window.abrirModalEventoRegistro('verificar_identidad')" class="block w-full mb-1.5 text-[13px] font-bold text-white bg-violet-600 hover:bg-violet-700 rounded-lg px-3 py-2 transition text-center">📋 Mis Registros / Cancelar</button>`;
 }
 
 // Registros del último "mis registros" agrupados por evento, guardados en memoria
@@ -2545,6 +2545,7 @@ let calendarioState = null;
 let calendarioItemsActuales = [];
 let calendarioDiasActuales = {};
 let calendarioListenerAttached = false;
+let calendarioDiaSeleccionado = null;
 
 function renderCalendario(anio, mes) {
   const body = document.getElementById("calendarioBody");
@@ -2624,9 +2625,17 @@ function renderVistaDia(dia) {
   const label = document.getElementById("calendarioMesLabel");
   if (!body || !calendarioState) return;
 
+  calendarioDiaSeleccionado = dia;
   label.textContent = `${dia} de ${MESES_LARGOS[calendarioState.month]} ${calendarioState.year}`;
   const items = calendarioDiasActuales[dia] || [];
-  let html = `<button class="volver-mes-btn mb-3 text-xs font-bold text-brand-600 hover:text-brand-700 flex items-center gap-1">← Volver al mes</button>`;
+  let html = `
+    <button class="volver-mes-btn mb-3 text-xs font-bold text-brand-600 hover:text-brand-700 flex items-center gap-1">← Volver al mes</button>
+    <div class="flex items-center justify-between mb-3 bg-slate-50 border border-slate-100 rounded-lg px-2 py-1.5">
+      <button class="dia-anterior-btn px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-xs transition">‹ Día anterior</button>
+      <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Cambiar de día</span>
+      <button class="dia-siguiente-btn px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-xs transition">Día siguiente ›</button>
+    </div>
+  `;
 
   if (!items.length) {
     html += `<p class="text-sm text-slate-500">No hay eventos programados este día.</p>`;
@@ -2647,6 +2656,27 @@ function renderVistaDia(dia) {
 
   const volverBtn = body.querySelector(".volver-mes-btn");
   if (volverBtn) volverBtn.addEventListener("click", () => renderCalendario(calendarioState.year, calendarioState.month));
+  const anteriorBtn = body.querySelector(".dia-anterior-btn");
+  if (anteriorBtn) anteriorBtn.addEventListener("click", () => cambiarDiaCalendario(-1));
+  const siguienteBtn = body.querySelector(".dia-siguiente-btn");
+  if (siguienteBtn) siguienteBtn.addEventListener("click", () => cambiarDiaCalendario(1));
+}
+
+// Mueve la vista un día antes/después del que se está viendo — si cruza a otro
+// mes, primero reconstruye el calendario de ese mes (calendarioDiasActuales)
+// antes de mostrar el día, para que el cupo/eventos de esa fecha sean correctos.
+function cambiarDiaCalendario(delta) {
+  if (!calendarioState || !calendarioDiaSeleccionado) return;
+  const fecha = new Date(calendarioState.year, calendarioState.month, calendarioDiaSeleccionado, 12, 0, 0);
+  fecha.setDate(fecha.getDate() + delta);
+  const nuevoAnio = fecha.getFullYear();
+  const nuevoMes = fecha.getMonth();
+  const nuevoDia = fecha.getDate();
+  if (nuevoAnio !== calendarioState.year || nuevoMes !== calendarioState.month) {
+    calendarioState = { year: nuevoAnio, month: nuevoMes };
+    renderCalendario(nuevoAnio, nuevoMes);
+  }
+  renderVistaDia(nuevoDia);
 }
 
 function mostrarDetalleCalendario(item) {
