@@ -6,15 +6,15 @@
 
 // ⚠️ REEMPLAZA ESTOS LINKS ENTRE COMILLAS POR TUS ENLACES REALES DE GOOGLE SHEETS (CSV)
 // Publica cada pestaña por separado: Archivo > Compartir > Publicar en la web > [pestaña] > CSV
-const URL_DEPORTIVOS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7e_v2ttLAYViX9W9bJ-eD_udPwdOgnBXriDz3bRpQEGMwmLTpA_oUXLOAORVieHG8KMYUoLyFVx/pub?gid=1330295260&single=true&output=csv";
+const URL_DEPORTIVOS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7e_v2ttLAYViX9W9bJ-eD_udPwdOgnBXriDz3bRpQEGMwmLTpA_oUXLOAORVieHG8KMYUoLyFVx/pub?gid=0&single=true&output=csv";
 const URL_SOCIALES_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7e_v2ttLAYViX9W9bJ-eD_udPwdOgnBXriDz3bRpQEGMwmLTpA_oUXLOAORVieHG8KMYUoLyFVx/pub?gid=1456759375&single=true&output=csv";
 const URL_CULTURALES_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7e_v2ttLAYViX9W9bJ-eD_udPwdOgnBXriDz3bRpQEGMwmLTpA_oUXLOAORVieHG8KMYUoLyFVx/pub?gid=433908363&single=true&output=csv";
 const URL_IMPACTO_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7e_v2ttLAYViX9W9bJ-eD_udPwdOgnBXriDz3bRpQEGMwmLTpA_oUXLOAORVieHG8KMYUoLyFVx/pub?gid=1748806311&single=true&output=csv";
 const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7e_v2ttLAYViX9W9bJ-eD_udPwdOgnBXriDz3bRpQEGMwmLTpA_oUXLOAORVieHG8KMYUoLyFVx/pub?gid=942672624&single=true&output=csv";
 
 // ⚠️ COPIA AQUÍ EL LINK DE IMPLEMENTACIÓN DE TU GOOGLE APPS SCRIPT (APLICACIÓN WEB /EXEC)
-// Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con IA.
-const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbybWHUUWAwIWfZPfFgZdPWCVzenzaWwJUY4g8HklKdFIDiJ6pTpYAf9OUyMku1RRSRo/exec";
+// Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con Gemini.
+const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbxWRpO1hcJvniDsKUbRFFr6rP5HGgnFa0EanV-qTv4i9MpYr9KcqC22xh26TObXAa3j/exec";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -146,6 +146,10 @@ function csvAObjetos(textoCsv) {
 
 function formatearContenido(texto) {
   let safe = escapeHtml(texto);
+  // Primero **doble** (estándar markdown, lo que a veces devuelve la IA), luego
+  // *simple* (nuestro estilo en las tarjetas) — en ese orden para no dejar
+  // asteriscos sueltos cuando el texto mezcla ambos formatos.
+  safe = safe.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   safe = safe.replace(/\*(.+?)\*/g, "<strong>$1</strong>");
   return safe.replace(/\n/g, "<br>");
 }
@@ -161,7 +165,7 @@ function addMessage(texto, sender = "bot") {
   } else {
     bubble.className = `${baseClasses} bg-white text-gray-800 border border-gray-100 rounded-tl-none`;
     if (texto.includes("<button")) {
-      bubble.innerHTML = texto.replace(/\n/g, "<br>").replace(/\*(.+?)\*/g, "<strong>$1</strong>");
+      bubble.innerHTML = texto.replace(/\n/g, "<br>").replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/\*(.+?)\*/g, "<strong>$1</strong>");
     } else {
       bubble.innerHTML = formatearContenido(texto);
     }
@@ -327,7 +331,7 @@ async function inicializar() {
     refrescarCuposLive();
 
     if (messagesEl && messagesEl.children.length === 0) {
-      addMessage(`👋 *¡Hola! Bienvenido a Eventos Comunitarios de Uplace.*\n\nSoy tu *Agente de Eventos*. Aquí puedes:\n\n🎟️ *Registrarte* a un evento, *consultar* tus registros o *cancelarlos* — todo desde el botón "Gestionar Eventos" (abajo)\n📂 Ver eventos por categoría en el *menú de la izquierda* — en el celular, tócalo con el ícono ☰ de la esquina superior izquierda de la pantalla\n🎈 Ver los eventos de *hoy* o de la *semana*\n📆 Abrir el Calendario Mensual para ver todo lo programado este mes y los siguientes\n🔍 Preguntar por un evento específico (ej. "¿qué días y horario tiene Zumba?")\n💳 Si el evento tiene costo, puedes registrarte con el pago *pendiente* y subir tu comprobante después — el Comité lo revisa y aprueba\n🚫 Si tu depto tiene *adeudos* con la administración, no podrás registrarte a eventos hasta regularizarlo\n⚠️ Si faltas a un evento sin cancelar a tiempo, a la *2ª vez* el sistema puede bloquear tus nuevos registros\n\nElige una opción o escríbeme lo que necesites:`, "bot");
+      addMessage(`👋 *¡Hola! Bienvenido a Eventos Comunitarios de Uplace.*\n\nSoy tu *Agente de Eventos*. Aquí puedes:\n\n🎟️ *Registrarte* a un evento, *consultar* tus registros o *cancelarlos* — todo desde el botón "Gestionar Eventos" (abajo)\n📂 Ver eventos por categoría en el *menú de la izquierda* — en el celular, tócalo con el ícono ☰ de la esquina superior izquierda de la pantalla\n🎈 Ver los eventos de *hoy* o de la *semana*\n🔍 Preguntar por un evento específico (ej. "¿qué días y horario tiene Zumba?")\n🤖 Hacerme preguntas más abiertas sobre los eventos (ej. "¿hay algo para niños?", "¿qué hay gratis esta semana?") — tengo IA y te ayudo a encontrar lo que buscas\n💳 Si el evento tiene costo, puedes registrarte con el pago *pendiente* y subir tu comprobante después — el Comité lo revisa y aprueba\n🚫 Si tu depto tiene *adeudos* con la administración, no podrás registrarte a eventos hasta regularizarlo\n⚠️ Si faltas a un evento sin cancelar a tiempo, a la *2ª vez* el sistema puede bloquear tus nuevos registros\n\nElige una opción o escríbeme lo que necesites:`, "bot");
       addMessage(mensajeBotonesBienvenida(), "bot");
     }
   } catch (error) {
