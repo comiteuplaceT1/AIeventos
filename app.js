@@ -331,7 +331,7 @@ async function inicializar() {
     refrescarCuposLive();
 
     if (messagesEl && messagesEl.children.length === 0) {
-      addMessage(`👋 *¡Hola! Bienvenido a Eventos Comunitarios de Uplace.*\n\nSoy tu *Agente IA de Eventos*. Aquí puedes:\n\n🎟️ *Registrarte* a un evento, *consultar* tus registros o *cancelarlos*, todo desde el botón *Gestionar Eventos*\n📂 Ver eventos por categoría en el *menú de la izquierda*, en el celular, tócalo con el ícono ☰ de la esquina superior izquierda de la pantalla\n🎈 Ver los eventos de *hoy* o de la *semana*\n📆 Abrir el Calendario Mensual para ver todo lo programado este mes y los siguientes\n🔍 Preguntar por un evento específico (ej. *¿qué días y horario tiene Zumba?*)\n🤖 Hacerme preguntas más abiertas sobre los eventos (ej. *¿hay algo para niños?*, *¿qué hay gratis esta semana?*, *¿cómo se juega a Waterpolo?*), tengo IA implementada y te ayudo a encontrar lo que buscas\n💳 Si el evento tiene costo, puedes registrarte con el pago *pendiente* y subir tu comprobante después, el Comité lo revisa y aprueba\n🚫 Si tu depto tiene *adeudos* con la administración, no podrás registrarte a eventos hasta regularizarlo\n⚠️ Si faltas a un evento sin cancelar a tiempo, a la *2ª vez* el sistema puede bloquear tus nuevos registros\n\nElige una opción o escríbeme lo que necesites:`, "bot");
+      addMessage(`👋 *¡Hola! Bienvenido a Eventos Comunitarios de Uplace.*\n\nSoy tu *Agente de Eventos*. Aquí puedes:\n\n🎟️ *Registrarte* a un evento, *consultar* tus registros o *cancelarlos* — todo desde el botón "Gestionar Eventos" (abajo)\n📂 Ver eventos por categoría en el *menú de la izquierda* — en el celular, tócalo con el ícono ☰ de la esquina superior izquierda de la pantalla\n🎈 Ver los eventos de *hoy* o de la *semana*\n🔍 Preguntar por un evento específico (ej. "¿qué días y horario tiene Zumba?")\n🤖 Hacerme preguntas más abiertas sobre los eventos (ej. "¿hay algo para niños?", "¿qué hay gratis esta semana?") — tengo IA y te ayudo a encontrar lo que buscas\n💳 Si el evento tiene costo, puedes registrarte con el pago *pendiente* y subir tu comprobante después — el Comité lo revisa y aprueba\n🚫 Si tu depto tiene *adeudos* con la administración, no podrás registrarte a eventos hasta regularizarlo\n⚠️ Si faltas a un evento sin cancelar a tiempo, a la *2ª vez* el sistema puede bloquear tus nuevos registros\n\nElige una opción o escríbeme lo que necesites:`, "bot");
       addMessage(mensajeBotonesBienvenida(), "bot");
     }
   } catch (error) {
@@ -394,7 +394,7 @@ function normalizarEventos(lista, categoria) {
     recurrencia: (ev["recurrencia"] || "").toLowerCase().trim(),
     recurrenciadetalle: ev["recurrenciadetalle"] || "",
     categoria
-  })).filter(ev => ev.eventoid && ev.fecha);
+  })).filter(ev => ev.eventoid && ev.nombre);
 }
 
 // ---------- Recurrencia semanal (clases tipo Zumba Lun/Mié/Sáb) ----------
@@ -602,8 +602,9 @@ function inyectarSubmenuEventos(idContenedor, eventos, categoria, emoji) {
   eventos.forEach(evento => {
     const recurrente = esRecurrente(evento);
     const esImpacto = evento.categoria === "Impacto";
-    const badgeTexto = esImpacto ? "" : (recurrente ? infoCupoResumenRecurrente(evento).texto : cupoInfo(evento, evento.fecha).texto);
-    const badgeLleno = esImpacto ? false : (recurrente ? infoCupoResumenRecurrente(evento).lleno : cupoInfo(evento, evento.fecha).lleno);
+    const sinFecha = !tieneFechaDefinida(evento);
+    const badgeTexto = sinFecha ? "📅 Fecha por definir" : (esImpacto ? "" : (recurrente ? infoCupoResumenRecurrente(evento).texto : cupoInfo(evento, evento.fecha).texto));
+    const badgeLleno = sinFecha ? false : (esImpacto ? false : (recurrente ? infoCupoResumenRecurrente(evento).lleno : cupoInfo(evento, evento.fecha).lleno));
     const btn = document.createElement("button");
     btn.type = "button";
     // Antes el nombre iba en una sola línea con "truncate" + un tooltip que solo
@@ -614,7 +615,7 @@ function inyectarSubmenuEventos(idContenedor, eventos, categoria, emoji) {
     btn.className = "group relative w-full text-left px-3 py-2 rounded-lg transition font-medium border-l-2 border-transparent hover:bg-slate-50 hover:border-brand-500";
     btn.innerHTML = `
       <span class="block text-sm text-slate-700 group-hover:text-slate-900 leading-snug break-words">${emoji} ${escapeHtml(evento.nombre)}</span>
-      ${badgeTexto ? `<span class="block mt-0.5 text-[10px] font-bold ${badgeLleno ? 'text-red-500' : 'text-emerald-600'}">${badgeTexto}</span>` : ""}
+      ${badgeTexto ? `<span class="block mt-0.5 text-[10px] font-bold ${sinFecha ? 'text-amber-600' : (badgeLleno ? 'text-red-500' : 'text-emerald-600')}">${badgeTexto}</span>` : ""}
     `;
     btn.title = evento.nombre;
     btn.onclick = () => mostrarTarjetaEventoEnChat(evento);
@@ -627,17 +628,42 @@ function horarioTexto(evento) {
   return `${evento.horainicio || "N/A"} - ${evento.horafin || "N/A"}`;
 }
 
+// Evento "planeado" que el Comité ya activó pero todavía no tiene fecha
+// confirmada. No aparece en el calendario ni en "hoy"/"semana" (no hay fecha
+// contra la cual ubicarlo), pero sí en las listas por categoría, marcado como
+// pendiente de fecha.
+function tieneFechaDefinida(evento) {
+  return !!evento.fecha && !isNaN(parseFechaLocal(evento.fecha).getTime());
+}
+
 // ---------- Tarjetas de evento (formato chat) ----------
 function tarjetaEventoTexto(evento, incluirBoton = true, fechaSesion = null) {
   const cfg = CATEGORIAS[evento.categoria];
-  const fecha = evento.fecha ? formatearFecha(parseFechaLocal(evento.fecha)) : "Sin fecha";
-  const recurrente = esRecurrente(evento);
   const esImpacto = evento.categoria === "Impacto";
 
   let lineas = [
     `${cfg ? cfg.emoji : "🎟️"} *${evento.nombre}*`,
     `📁 Categoría: ${evento.categoria}`,
   ];
+
+  if (!tieneFechaDefinida(evento)) {
+    // Evento planeado pero sin fecha confirmada todavía: no sale en el
+    // calendario ni en "hoy"/"semana" (no hay fecha contra la cual ubicarlo),
+    // y no se puede registrar/apoyar hasta que el Comité le ponga fecha.
+    lineas.push(`📅 Fecha: *Por definir* — evento planeado, aún sin fecha confirmada`);
+    lineas.push(`🕐 Horario: ${horarioTexto(evento)}`);
+    lineas.push(`📍 Lugar: ${evento.ubicacion || "N/A"}`);
+    if (evento.tienecosto) lineas.push(`💰 *Este evento tiene costo* (consulta el monto con el Comité)`);
+    if (evento.descripcion) lineas.push(`📝 ${evento.descripcion}`);
+    let textoSinFecha = lineas.join("\n");
+    if (incluirBoton) {
+      textoSinFecha += `\n<button disabled class="mt-2 block text-[11px] font-bold text-slate-400 bg-slate-100 rounded-lg px-3 py-1.5 cursor-not-allowed">🕓 Aún sin fecha — no se puede registrar todavía</button>`;
+    }
+    return textoSinFecha;
+  }
+
+  const fecha = evento.fecha ? formatearFecha(parseFechaLocal(evento.fecha)) : "Sin fecha";
+  const recurrente = esRecurrente(evento);
 
   if (!recurrente || fechaSesion) {
     // Evento de un solo día, o una sesión puntual ya elegida (ej. desde el calendario)
@@ -840,6 +866,11 @@ function tieneIntencionOperativa(texto) {
 window.iniciarRegistro = function(eventoId, categoria, nombreEvento, fechaSesion) {
   const evento = buscarEventoPorId(eventoId, categoria);
   if (!evento) { addMessage("⚠️ No encontré ese evento.", "bot"); return; }
+
+  if (!tieneFechaDefinida(evento)) {
+    addMessage(`🕓 *${nombreEvento}* todavía no tiene fecha confirmada — el Comité la va a definir pronto. Vuelve a revisar más adelante para registrarte.`, "bot");
+    return;
+  }
 
   if (fechaSesion || !esRecurrente(evento)) {
     const info = cupoInfo(evento, fechaSesion || evento.fecha);
@@ -1621,7 +1652,12 @@ function camposFormularioEvento(v) {
       </div>
       <div>
         <label class="block text-xs font-bold text-slate-500 mb-1" id="labelFecha">Fecha</label>
-        <input id="fFecha" type="date" value="${escapeHtml(v.fecha || "")}" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+        <input id="fFecha" type="date" value="${escapeHtml(v.fecha || "")}" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" ${v.sinFechaInicial ? "disabled" : ""}>
+        <label class="flex items-center gap-2 text-xs font-bold text-slate-500 cursor-pointer mt-1.5">
+          <input id="fSinFecha" type="checkbox" class="rounded border-slate-300 text-brand-600 focus:ring-brand-500" ${v.sinFechaInicial ? "checked" : ""}>
+          Evento planeado, todavía sin fecha confirmada
+        </label>
+        <p class="text-[10px] text-slate-400 mt-1">Sale como activo en el menú por categoría marcado "Fecha por definir", pero no aparece en el calendario ni se puede registrar hasta que le pongas fecha (editando el evento después).</p>
       </div>
 
       <div id="wrapperImpacto1" class="${esImpactoInicial ? "" : "hidden"}"></div>
@@ -1745,6 +1781,24 @@ function adjuntarListenersFormularioEvento() {
   };
   selCategoria.addEventListener("change", toggleImpacto);
   toggleImpacto();
+
+  const chkSinFecha = document.getElementById("fSinFecha");
+  const inputFecha = document.getElementById("fFecha");
+  const toggleSinFecha = () => {
+    const sinFecha = chkSinFecha.checked;
+    inputFecha.disabled = sinFecha;
+    if (sinFecha) inputFecha.value = "";
+    // Sin fecha de arranque no se puede calcular recurrencia (necesita un ancla) —
+    // se deshabilita todo el bloque de "¿Se repite?" mientras esté marcado.
+    const wrapperRec = document.getElementById("wrapperNoImpacto3");
+    if (wrapperRec) {
+      wrapperRec.classList.toggle("opacity-40", sinFecha);
+      wrapperRec.classList.toggle("pointer-events-none", sinFecha);
+      if (sinFecha) document.getElementById("fTipoRecurrencia").value = "";
+    }
+  };
+  chkSinFecha.addEventListener("change", toggleSinFecha);
+  toggleSinFecha();
 
   const selTipoRec = document.getElementById("fTipoRecurrencia");
   const toggleRecurrencia = () => {
@@ -1936,6 +1990,7 @@ function renderAdminPanel() {
       recurrencia: tipoRecurrencia(ev),
       recurrenciadetalle: ev.recurrenciadetalle,
       fechaFin: ev.fechafin,
+      sinFechaInicial: !tieneFechaDefinida(ev),
       _esEdicion: true
     };
     body.innerHTML = camposFormularioEvento(valores) + `
@@ -2176,7 +2231,8 @@ function leerCamposFormularioEvento() {
   const esImpacto = categoria === "Impacto";
   const nombre = document.getElementById("fNombre").value.trim();
   const descripcion = document.getElementById("fDescripcion").value.trim();
-  const fecha = document.getElementById("fFecha").value;
+  const sinFecha = document.getElementById("fSinFecha").checked;
+  const fecha = sinFecha ? "" : document.getElementById("fFecha").value;
   const horaInicio = esImpacto ? "" : document.getElementById("fHoraInicio").value;
   const horaFin = esImpacto ? "" : document.getElementById("fHoraFin").value;
   const ubicacion = document.getElementById("fUbicacion").value;
@@ -2185,7 +2241,7 @@ function leerCamposFormularioEvento() {
   const tieneCosto = esImpacto ? false : document.getElementById("fTieneCosto").checked;
   const huellasMaxDepto = esImpacto ? "" : document.getElementById("fHuellasMaxDepto").value.trim();
 
-  const tipoRecurrencia = document.getElementById("fTipoRecurrencia").value;
+  const tipoRecurrencia = sinFecha ? "" : document.getElementById("fTipoRecurrencia").value;
   let diasSemana = "", detalleDias = "", fechaFin = "", recurrenciaDetalle = "";
   if (tipoRecurrencia === "semanal") {
     diasSemana = Array.from(document.querySelectorAll(".fDiaSemana:checked")).map(c => c.value).join(",");
@@ -2198,11 +2254,12 @@ function leerCamposFormularioEvento() {
     fechaFin = document.getElementById("fFechaFin").value;
   }
 
-  return { categoria, nombre, descripcion, fecha, horaInicio, horaFin, ubicacion, sinCupo, cupoTotal, tieneCosto, huellasMaxDepto, tipoRecurrencia, diasSemana, detalleDias, fechaFin, recurrenciaDetalle };
+  return { categoria, nombre, descripcion, fecha, sinFecha, horaInicio, horaFin, ubicacion, sinCupo, cupoTotal, tieneCosto, huellasMaxDepto, tipoRecurrencia, diasSemana, detalleDias, fechaFin, recurrenciaDetalle };
 }
 
 function validarCamposFormularioEvento(f) {
-  if (!f.nombre || !f.fecha) return "Nombre y fecha son obligatorios.";
+  if (!f.nombre) return "El nombre del evento es obligatorio.";
+  if (!f.sinFecha && !f.fecha) return "Indica una fecha, o marca \"Evento planeado, todavía sin fecha confirmada\".";
   if (f.categoria !== "Impacto") {
     if (!f.sinCupo && (!f.cupoTotal || Number(f.cupoTotal) <= 0)) return "Indica un cupo total mayor a 0, o marca \"Sin límite de cupo\".";
   }
@@ -2852,6 +2909,9 @@ function seleccionarEventoDesdeLista(evento) {
 }
 
 function infoEventoParaListaModal(evento) {
+  if (!tieneFechaDefinida(evento)) {
+    return { lleno: true, texto: "📅 Fecha por definir", fechaTexto: "Por definir" };
+  }
   if (!esRecurrente(evento)) {
     const info = cupoInfo(evento, evento.fecha);
     return { lleno: info.lleno, texto: info.texto, fechaTexto: formatearFecha(parseFechaLocal(evento.fecha)) };
