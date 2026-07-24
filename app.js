@@ -14,8 +14,7 @@ const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7
 
 // ⚠️ COPIA AQUÍ EL LINK DE IMPLEMENTACIÓN DE TU GOOGLE APPS SCRIPT (APLICACIÓN WEB /EXEC)
 // Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con IA.
-const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbybWHUUWAwIWfZPfFgZdPWCVzenzaWwJUY4g8HklKdFIDiJ6pTpYAf9OUyMku1RRSRo/exec";
-
+const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbyEw-G85QK8QjvcQWc4E-630Gf955F7lBZYTecgQsKdInDzD8dJFVkO1IMf2ucW-u3Y/exec";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -249,7 +248,7 @@ function cupoInfo(evento, fechaSesion) {
       sinLimite: true,
       fecha,
       texto: esImpacto
-        ? `${confirmados} apoyo${confirmados !== 1 ? "s" : ""} hasta ahora`
+        ? `Apoyo abierto`
         : `Sin límite (${confirmados} registrado${confirmados !== 1 ? "s" : ""})`
     };
   }
@@ -3570,7 +3569,7 @@ function renderModalFeedback() {
 
   if (feedbackState.paso === "formulario") {
     body.innerHTML = `
-      <p class="text-sm text-slate-600 mb-3">Escríbele al Comité — puede ser una duda, un comentario o una recomendación sobre los eventos.</p>
+      <p class="text-sm text-slate-600 mb-3">Escríbele al Comité — puede ser una duda, un comentario o una recomendación sobre el edificio o los eventos.</p>
       <div class="space-y-2.5">
         <div>
           <label class="block text-xs font-bold text-slate-500 mb-1">Número de departamento</label>
