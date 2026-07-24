@@ -13,8 +13,9 @@ const URL_IMPACTO_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7e_
 const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7e_v2ttLAYViX9W9bJ-eD_udPwdOgnBXriDz3bRpQEGMwmLTpA_oUXLOAORVieHG8KMYUoLyFVx/pub?gid=942672624&single=true&output=csv";
 
 // ⚠️ COPIA AQUÍ EL LINK DE IMPLEMENTACIÓN DE TU GOOGLE APPS SCRIPT (APLICACIÓN WEB /EXEC)
-// Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con Gemini.
-const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbxcVPp91IUcGUgELaAv3l0S1d2YqbxIsc-cZPVh_pkVCIepOj2rn9e1DJHDaE_OGXwo/exec";
+// Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con IA.
+const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbybWHUUWAwIWfZPfFgZdPWCVzenzaWwJUY4g8HklKdFIDiJ6pTpYAf9OUyMku1RRSRo/exec";
+
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -327,7 +328,7 @@ async function inicializar() {
     refrescarCuposLive();
 
     if (messagesEl && messagesEl.children.length === 0) {
-      addMessage(`👋 *¡Hola! Bienvenido a Eventos Comunitarios de Uplace.*\n\nSoy tu *Agente de Eventos*. Aquí puedes:\n\n🎟️ Registrarte a un evento, consultar tus registros o cancelarlos — todo desde el botón *Gestionar Eventos*\n📂 Ver eventos por categoría en el menú de la izquierda — en el celular, tócalo con el ícono ☰ de la esquina superior izquierda de la pantalla\n🎈 Ver los eventos de hoy o de la semana\n📆 Abrir el Calendario Mensual para ver todo lo programado este mes y los siguientes\n🔍 Preguntar por un evento específico (ej. "¿qué días y horario tiene Zumba?", "¿que deportes hay?", "alguna actividad social?, o directamente "deportes", "social")\n💳 Si el evento tiene costo, puedes registrarte con el pago pendiente y subir tu comprobante después, o en caso de haberlo pagado, subirlo en ese mismo momento — el Comité lo revisará y aprobara\n🚫 Si tu depto tiene adeudos con la administración, no podrás registrarte a eventos hasta regularizarlo\n⚠️ Si faltas a un evento que no requiere pago sin cancelar a tiempo, el sistema registra las asistencias y a la 2ª vez podría bloquear tus nuevos registros, en caso de ser un evento que requiera pago, solo perderás esa sesion\n\nElige una opción o escríbeme lo que necesites:`, "bot");
+      addMessage(`👋 *¡Hola! Bienvenido a Eventos Comunitarios de Uplace.*\n\nSoy tu *Agente de Eventos*. Aquí puedes:\n\n🎟️ *Registrarte* a un evento, *consultar* tus registros o *cancelarlos* — todo desde el botón "Gestionar Eventos" (abajo)\n📂 Ver eventos por categoría en el *menú de la izquierda* — en el celular, tócalo con el ícono ☰ de la esquina superior izquierda de la pantalla\n🎈 Ver los eventos de *hoy* o de la *semana*\n🔍 Preguntar por un evento específico (ej. "¿qué días y horario tiene Zumba?")\n💳 Si el evento tiene costo, puedes registrarte con el pago *pendiente* y subir tu comprobante después — el Comité lo revisa y aprueba\n🚫 Si tu depto tiene *adeudos* con la administración, no podrás registrarte a eventos hasta regularizarlo\n⚠️ Si faltas a un evento sin cancelar a tiempo, a la *2ª vez* el sistema puede bloquear tus nuevos registros\n\nElige una opción o escríbeme lo que necesites:`, "bot");
       addMessage(mensajeBotonesBienvenida(), "bot");
     }
   } catch (error) {
@@ -1473,8 +1474,12 @@ function responderMensajeLocal(textoOriginal) {
   // horario, días, etc.), responde con ESE evento — antes que cualquier trigger
   // genérico. Así "qué días hay Ping Pong" no dispara toda la agenda semanal solo
   // porque la frase natural para preguntarlo incluye la palabra "semana"/"días".
+  // Si la consulta es corta (1-3 palabras, ej. solo "waterpolo" o "baile"), se
+  // asume que quiere la ficha del evento aunque no use ninguna palabra operativa
+  // — nadie escribe una pregunta de conocimiento general en una sola palabra.
   const candidatos = buscarEventoPorNombreParcial(texto);
-  if (candidatos.length > 0 && tieneIntencionOperativa(texto)) {
+  const esConsultaCorta = normalizado.split(/\s+/).filter(w => w.length > 0).length <= 3;
+  if (candidatos.length > 0 && (tieneIntencionOperativa(texto) || esConsultaCorta)) {
     return candidatos.map(ev => tarjetaEventoTexto(ev)).join("\n\n") + tipSiguientePaso();
   }
 
@@ -1833,6 +1838,7 @@ function renderAdminPanel() {
         <button id="adminBtnCancelar" class="w-full bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-lg py-2.5 transition">🛑 Cancelar evento</button>
         <button id="adminBtnAprobarPagos" class="w-full bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-lg py-2.5 transition">💳 Aprobar registros de pago</button>
         <button id="adminBtnAsistencias" class="w-full bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-lg py-2.5 transition">📋 Asistencias y bloqueados</button>
+        <button id="adminBtnVerFeedback" class="w-full bg-slate-600 hover:bg-slate-700 text-white text-sm font-bold rounded-lg py-2.5 transition">💬 Ver Feedback / Contacto</button>
         <button id="adminBtnBajaResidente" class="w-full bg-slate-700 hover:bg-slate-800 text-white text-sm font-bold rounded-lg py-2.5 transition">🙅 Dar de baja a un residente</button>
       </div>
     `;
@@ -1841,6 +1847,7 @@ function renderAdminPanel() {
     document.getElementById("adminBtnCancelar").addEventListener("click", () => { adminState.paso = "cancelar_categoria"; renderAdminPanel(); });
     document.getElementById("adminBtnAprobarPagos").addEventListener("click", () => { adminState.paso = "aprobar_lista"; renderAdminPanel(); cargarPendientes(); });
     document.getElementById("adminBtnAsistencias").addEventListener("click", () => { adminState.paso = "asistencias_menu"; renderAdminPanel(); });
+    document.getElementById("adminBtnVerFeedback").addEventListener("click", () => { adminState.paso = "feedback_lista"; renderAdminPanel(); });
     document.getElementById("adminBtnBajaResidente").addEventListener("click", () => { adminState.paso = "baja_categoria"; renderAdminPanel(); });
     return;
   }
@@ -2003,6 +2010,17 @@ function renderAdminPanel() {
     `;
     document.getElementById("adminBtnVolverBloqMenu").addEventListener("click", () => { adminState.paso = "asistencias_menu"; renderAdminPanel(); });
     cargarBloqueados();
+    return;
+  }
+
+  // ---- Ver Feedback / Contacto ----
+  if (adminState.paso === "feedback_lista") {
+    body.innerHTML = `
+      <div id="listaFeedback" class="space-y-2 max-h-[55vh] overflow-y-auto pr-1"><p class="text-xs text-slate-400">Cargando…</p></div>
+      <button id="adminBtnVolverMenuFeedback" class="w-full mt-3 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-lg py-2 transition">← Volver</button>
+    `;
+    document.getElementById("adminBtnVolverMenuFeedback").addEventListener("click", () => { adminState.paso = "menu"; renderAdminPanel(); });
+    cargarFeedback();
     return;
   }
 
@@ -2258,6 +2276,55 @@ async function guardarEdicionEvento() {
 }
 
 // ---------- Aprobar registros de pago ----------
+// ---------- Ver Feedback / Contacto ----------
+async function cargarFeedback() {
+  const cont = document.getElementById("listaFeedback");
+  if (cont) cont.innerHTML = `<p class="text-xs text-slate-400">Cargando…</p>`;
+  try {
+    const url = `${URL_AGENTE_EVENTOS}?accion=listar_feedback&pin=${encodeURIComponent(adminState.pin)}`;
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json();
+    if (!data.ok) { if (cont) cont.innerHTML = `<p class="text-xs text-red-600">${escapeHtml(data.error || "Error")}</p>`; return; }
+    adminState.feedback = data.feedback || [];
+    renderListaFeedback();
+  } catch (e) {
+    if (cont) cont.innerHTML = `<p class="text-xs text-red-600">Error de conexión.</p>`;
+  }
+}
+
+function renderListaFeedback() {
+  const cont = document.getElementById("listaFeedback");
+  if (!cont) return;
+  const feedback = adminState.feedback || [];
+  if (!feedback.length) { cont.innerHTML = `<p class="text-xs text-slate-400">No hay mensajes todavía.</p>`; return; }
+  cont.innerHTML = feedback.map(f => `
+    <div class="border rounded-lg p-3 ${f.estado === "Revisado" ? "bg-slate-50 border-slate-200" : "bg-amber-50 border-amber-200"}">
+      <div class="flex items-center justify-between gap-2">
+        <p class="text-[11px] font-bold ${f.tipo === "Consulta" ? "text-sky-700" : "text-purple-700"}">${f.tipo === "Consulta" ? "❓ Consulta" : "💡 Comentario / Recomendación"}</p>
+        <span class="text-[10px] font-bold ${f.estado === "Revisado" ? "text-slate-400" : "text-amber-600"}">${f.estado === "Revisado" ? "Revisado" : "Nuevo"}</span>
+      </div>
+      <p class="text-xs text-slate-500 mt-0.5">Depto ${escapeHtml(f.depto)} · ${escapeHtml(f.nombre)}${f.timestamp ? " · " + escapeHtml(f.timestamp) : ""}</p>
+      <p class="text-sm text-slate-800 mt-1.5 whitespace-pre-wrap">${escapeHtml(f.mensaje)}</p>
+      ${f.estado !== "Revisado" ? `<button class="btnMarcarRevisado mt-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg px-3 py-1.5 transition" data-id="${f.feedbackId}">✓ Marcar como revisado</button>` : ""}
+    </div>
+  `).join("");
+  document.querySelectorAll(".btnMarcarRevisado").forEach(btn => btn.addEventListener("click", () => marcarFeedbackRevisadoAdmin(btn.getAttribute("data-id"))));
+}
+
+async function marcarFeedbackRevisadoAdmin(feedbackId) {
+  try {
+    const url = `${URL_AGENTE_EVENTOS}?accion=marcar_feedback_revisado&pin=${encodeURIComponent(adminState.pin)}&feedbackId=${encodeURIComponent(feedbackId)}`;
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json();
+    if (!data.ok) { alert(data.error || "No se pudo marcar."); return; }
+    const f = (adminState.feedback || []).find(x => x.feedbackId === feedbackId);
+    if (f) f.estado = "Revisado";
+    renderListaFeedback();
+  } catch (e) {
+    alert("Error de conexión.");
+  }
+}
+
 async function cargarPendientes() {
   const cont = document.getElementById("listaPendientes");
   if (cont) cont.innerHTML = `<p class="text-xs text-slate-400">Cargando…</p>`;
@@ -3462,6 +3529,149 @@ async function confirmarCancelacionModal() {
     regModal.enviando = false;
     regModal.errorFormulario = "Error de conexión al cancelar.";
     renderModalEventoRegistro();
+  }
+}
+
+// =====================================================================
+// MODAL "Feedback / Contacto" — consulta, comentario o recomendación de un
+// residente hacia el Comité. Mismo patrón que el modal de registro: formulario
+// -> confirmación -> resultado, con depto+nombre para que el Comité sepa quién
+// escribe (no anónimo).
+// =====================================================================
+let feedbackState = null;
+
+function estadoInicialFeedback() {
+  return {
+    paso: "formulario",
+    depto: deptoRecordado || "",
+    nombre: nombreRecordado || "",
+    tipo: null,
+    mensaje: "",
+    enviando: false,
+    error: null
+  };
+}
+
+window.abrirModalFeedback = function() {
+  feedbackState = estadoInicialFeedback();
+  const modal = document.getElementById("modalFeedback");
+  if (modal) modal.classList.remove("hidden");
+  renderModalFeedback();
+};
+
+window.cerrarModalFeedback = function() {
+  const modal = document.getElementById("modalFeedback");
+  if (modal) modal.classList.add("hidden");
+};
+
+function renderModalFeedback() {
+  const body = document.getElementById("feedbackBody");
+  if (!body || !feedbackState) return;
+
+  if (feedbackState.paso === "formulario") {
+    body.innerHTML = `
+      <p class="text-sm text-slate-600 mb-3">Escríbele al Comité — puede ser una duda, un comentario o una recomendación sobre el edificio o los eventos.</p>
+      <div class="space-y-2.5">
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1">Número de departamento</label>
+          <input id="fbDepto" type="text" inputmode="numeric" placeholder="Ej. 3801 o 605" value="${escapeHtml(feedbackState.depto)}" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1">Tu nombre</label>
+          <input id="fbNombre" type="text" value="${escapeHtml(feedbackState.nombre)}" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1">¿Qué es esto?</label>
+          <div class="flex gap-2">
+            <label class="flex-1 flex items-center justify-center gap-1.5 text-xs font-bold border rounded-lg px-3 py-2 cursor-pointer transition ${feedbackState.tipo === "Consulta" ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-600"}">
+              <input type="radio" name="fbTipo" value="Consulta" class="fbTipoInput" ${feedbackState.tipo === "Consulta" ? "checked" : ""}> ❓ Consulta
+            </label>
+            <label class="flex-1 flex items-center justify-center gap-1.5 text-xs font-bold border rounded-lg px-3 py-2 cursor-pointer transition ${feedbackState.tipo === "Comentario" ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-600"}">
+              <input type="radio" name="fbTipo" value="Comentario" class="fbTipoInput" ${feedbackState.tipo === "Comentario" ? "checked" : ""}> 💡 Comentario / Recomendación
+            </label>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1">Tu mensaje</label>
+          <textarea id="fbMensaje" rows="4" placeholder="Escribe aquí..." class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">${escapeHtml(feedbackState.mensaje)}</textarea>
+        </div>
+      </div>
+      ${feedbackState.error ? `<p class="text-xs font-bold text-red-600 mt-2">⚠️ ${escapeHtml(feedbackState.error)}</p>` : ""}
+      <div class="flex gap-2 mt-3">
+        <button id="fbBtnCancelar" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg py-2.5 transition">Cancelar</button>
+        <button id="fbBtnContinuar" class="flex-1 bg-slate-700 hover:bg-slate-800 text-white text-sm font-bold rounded-lg py-2.5 transition">Continuar</button>
+      </div>
+    `;
+    document.getElementById("fbDepto").addEventListener("input", (e) => feedbackState.depto = e.target.value.trim());
+    document.getElementById("fbNombre").addEventListener("input", (e) => feedbackState.nombre = e.target.value);
+    document.getElementById("fbMensaje").addEventListener("input", (e) => feedbackState.mensaje = e.target.value);
+    document.querySelectorAll(".fbTipoInput").forEach(radio => {
+      radio.addEventListener("change", (e) => { feedbackState.tipo = e.target.value; renderModalFeedback(); });
+    });
+    document.getElementById("fbBtnCancelar").addEventListener("click", window.cerrarModalFeedback);
+    document.getElementById("fbBtnContinuar").addEventListener("click", () => {
+      feedbackState.error = null;
+      if (!/^[0-9]{2,5}$/.test(feedbackState.depto || "")) { feedbackState.error = "Indica un número de depto válido (solo números)."; renderModalFeedback(); return; }
+      if (!feedbackState.nombre || feedbackState.nombre.trim().length < 3) { feedbackState.error = "Indica tu nombre completo."; renderModalFeedback(); return; }
+      if (!feedbackState.tipo) { feedbackState.error = "Indica si es una consulta o un comentario/recomendación."; renderModalFeedback(); return; }
+      if (!feedbackState.mensaje || feedbackState.mensaje.trim().length < 5) { feedbackState.error = "Escribe tu mensaje."; renderModalFeedback(); return; }
+      feedbackState.paso = "confirmar";
+      renderModalFeedback();
+    });
+    return;
+  }
+
+  if (feedbackState.paso === "confirmar") {
+    body.innerHTML = `
+      <p class="text-sm font-bold text-slate-800 mb-2">¿Confirmas enviar esto al Comité?</p>
+      <div class="bg-slate-50 border border-slate-100 rounded-lg p-3 mb-3 text-xs text-slate-700 space-y-1">
+        <p><strong>Depto:</strong> ${escapeHtml(feedbackState.depto)}</p>
+        <p><strong>Nombre:</strong> ${escapeHtml(feedbackState.nombre)}</p>
+        <p><strong>Tipo:</strong> ${feedbackState.tipo === "Consulta" ? "❓ Consulta" : "💡 Comentario / Recomendación"}</p>
+        <p><strong>Mensaje:</strong> ${escapeHtml(feedbackState.mensaje)}</p>
+      </div>
+      ${feedbackState.error ? `<p class="text-xs font-bold text-red-600 mb-2">⚠️ ${escapeHtml(feedbackState.error)}</p>` : ""}
+      <div class="flex gap-2">
+        <button id="fbBtnVolverEditar" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg py-2.5 transition">← Editar</button>
+        <button id="fbBtnEnviar" class="flex-1 bg-slate-700 hover:bg-slate-800 text-white text-sm font-bold rounded-lg py-2.5 transition">${feedbackState.enviando ? "Enviando…" : "✅ Enviar"}</button>
+      </div>
+    `;
+    document.getElementById("fbBtnVolverEditar").addEventListener("click", () => { feedbackState.paso = "formulario"; renderModalFeedback(); });
+    const btn = document.getElementById("fbBtnEnviar");
+    btn.disabled = feedbackState.enviando;
+    btn.addEventListener("click", enviarFeedbackHandler);
+    return;
+  }
+
+  if (feedbackState.paso === "resultado") {
+    body.innerHTML = `
+      <p class="text-sm font-bold text-emerald-700 mb-2">✅ ¡Gracias! Tu mensaje fue enviado al Comité.</p>
+      <p class="text-xs text-slate-600 mb-3">Lo van a revisar lo antes posible. Si es una consulta urgente, también puedes contactar directamente a la administración.</p>
+      <button id="fbBtnCerrar" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg py-2.5 transition">Cerrar</button>
+    `;
+    document.getElementById("fbBtnCerrar").addEventListener("click", window.cerrarModalFeedback);
+    return;
+  }
+}
+
+async function enviarFeedbackHandler() {
+  feedbackState.enviando = true;
+  feedbackState.error = null;
+  renderModalFeedback();
+  try {
+    const url = `${URL_AGENTE_EVENTOS}?accion=enviar_feedback&depto=${encodeURIComponent(feedbackState.depto)}&nombre=${encodeURIComponent(feedbackState.nombre)}&tipo=${encodeURIComponent(feedbackState.tipo)}&mensaje=${encodeURIComponent(feedbackState.mensaje)}`;
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json();
+    feedbackState.enviando = false;
+    if (!data.ok) { feedbackState.error = data.error || "No se pudo enviar. Intenta de nuevo."; renderModalFeedback(); return; }
+    deptoRecordado = feedbackState.depto;
+    nombreRecordado = feedbackState.nombre;
+    feedbackState.paso = "resultado";
+    renderModalFeedback();
+  } catch (e) {
+    feedbackState.enviando = false;
+    feedbackState.error = "Error de conexión. Intenta de nuevo.";
+    renderModalFeedback();
   }
 }
 
