@@ -27,7 +27,6 @@ const UBICACIONES = [
   "Alberca / Jacuzzi P6",
   "Chapoteadero P6",
   "Salón Yoga P6",
-  "Asadores P6",
   "Jardín P6",
   "Coffee Place PB",
   "Lobby PB",
@@ -714,11 +713,14 @@ function tarjetaEventoTexto(evento, incluirBoton = true, fechaSesion = null) {
     // del modal "Registrarme a Evento" (checkboxes por fecha + "todas"), no aquí
     // en la tarjeta del chat — un solo botón abre el modal ya con el evento
     // preseleccionado, con o sin sesión puntual.
+    const ocurrenciasMes = recurrente ? ocurrenciasDelMesActual(evento) : null;
+    const sinSesionesEsteMes = recurrente && ocurrenciasMes.length === 0;
     const bloqueadoDelTodo = recurrente
-      ? ocurrenciasDelMesActual(evento).length > 0 && ocurrenciasDelMesActual(evento).every(f => cupoInfo(evento, fechaISO(f)).lleno)
+      ? (sinSesionesEsteMes || ocurrenciasMes.every(f => cupoInfo(evento, fechaISO(f)).lleno))
       : cupoInfo(evento, fechaSesion || evento.fecha).lleno;
     if (bloqueadoDelTodo) {
-      texto += `\n<button disabled class="mt-2 block text-[11px] font-bold text-slate-400 bg-slate-100 rounded-lg px-3 py-1.5 cursor-not-allowed">Cupo lleno</button>`;
+      const etiquetaBloqueo = sinSesionesEsteMes ? "No hay más sesiones este mes" : "Cupo lleno";
+      texto += `\n<button disabled class="mt-2 block text-[11px] font-bold text-slate-400 bg-slate-100 rounded-lg px-3 py-1.5 cursor-not-allowed">${etiquetaBloqueo}</button>`;
     } else {
       const fechaArg = fechaSesion ? `, '${fechaSesion}'` : "";
       const etiquetaBoton = esImpacto ? "🙋 Quiero apoyar" : "✅ Registrarme";
@@ -2403,20 +2405,36 @@ async function cargarPendientes() {
 function renderListaPendientes() {
   const cont = document.getElementById("listaPendientes");
   if (!cont) return;
-  const pendientes = adminState.pendientes || [];
-  if (!pendientes.length) { cont.innerHTML = `<p class="text-xs text-slate-400">No hay registros pendientes de aprobación. 🎉</p>`; return; }
-  cont.innerHTML = pendientes.map(p => `
+  const todos = adminState.pendientes || [];
+  if (!todos.length) { cont.innerHTML = `<p class="text-xs text-slate-400">Todavía no hay registros de eventos con costo.</p>`; return; }
+
+  const pendientes = todos.filter(p => p.estado === "Pendiente");
+  const aprobados = todos.filter(p => p.estado === "Aprobado");
+  const rechazados = todos.filter(p => p.estado === "Cancelado" && p.estadoPago === "Rechazado");
+
+  const tarjeta = (p, conAcciones) => `
     <div class="bg-slate-50 border border-slate-200 rounded-lg p-3">
       <p class="text-sm font-bold text-slate-800">${escapeHtml(p.nombreEvento)}</p>
       <p class="text-xs text-slate-500">${escapeHtml(p.fechaSesion)} · Depto ${escapeHtml(p.depto)} · ${escapeHtml(p.nombre)}${p.numAcompanantes > 0 ? ` +${p.numAcompanantes} acomp. (${escapeHtml(p.nombresAcompanantes || "")})` : ""}</p>
-      <p class="text-[11px] font-bold ${p.estadoPago === "Pagado" ? "text-emerald-600" : "text-amber-600"} mt-1">${p.estadoPago === "Pagado" ? "✅ Marcó que ya pagó" : "⏳ Marcó pago pendiente"}</p>
+      <p class="text-[11px] font-bold ${p.estadoPago === "Pagado" ? "text-emerald-600" : (p.estadoPago === "Rechazado" ? "text-red-600" : "text-amber-600")} mt-1">${p.estadoPago === "Pagado" ? "✅ Marcó que ya pagó" : (p.estadoPago === "Rechazado" ? "✕ Rechazado por el Comité" : "⏳ Marcó pago pendiente")}</p>
       ${p.comprobantePago ? `<a href="${p.comprobantePago}" target="_blank" rel="noopener" class="text-[11px] text-brand-600 underline font-bold">Ver comprobante</a>` : `<p class="text-[11px] text-slate-400">Sin comprobante adjunto</p>`}
+      ${conAcciones ? `
       <div class="flex gap-2 mt-2">
         <button class="btnAprobarReg flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg py-2 transition" data-id="${p.registroId}">✅ Aprobar</button>
         <button class="btnRechazarReg flex-1 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg py-2 transition" data-id="${p.registroId}">✕ Rechazar</button>
-      </div>
+      </div>` : ""}
     </div>
-  `).join("");
+  `;
+
+  let html = "";
+  html += `<p class="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">⏳ Pendientes de aprobar (${pendientes.length})</p>`;
+  html += pendientes.length ? `<div class="space-y-2 mb-4">${pendientes.map(p => tarjeta(p, true)).join("")}</div>` : `<p class="text-xs text-slate-400 mb-4">No hay ninguno pendiente. 🎉</p>`;
+  html += `<p class="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">✅ Aprobados (${aprobados.length})</p>`;
+  html += aprobados.length ? `<div class="space-y-2 mb-4">${aprobados.map(p => tarjeta(p, false)).join("")}</div>` : `<p class="text-xs text-slate-400 mb-4">Ninguno todavía.</p>`;
+  html += `<p class="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">✕ Rechazados (${rechazados.length})</p>`;
+  html += rechazados.length ? `<div class="space-y-2">${rechazados.map(p => tarjeta(p, false)).join("")}</div>` : `<p class="text-xs text-slate-400">Ninguno todavía.</p>`;
+
+  cont.innerHTML = html;
   document.querySelectorAll(".btnAprobarReg").forEach(btn => btn.addEventListener("click", () => accionRegistroAdmin(btn.getAttribute("data-id"), "aprobar")));
   document.querySelectorAll(".btnRechazarReg").forEach(btn => btn.addEventListener("click", () => accionRegistroAdmin(btn.getAttribute("data-id"), "rechazar")));
 }
@@ -3023,7 +3041,7 @@ function renderModalEventoRegistro() {
       const confirmadas = (data.detalle || []).filter(d => d.ok);
       const fallidas = (data.detalle || []).filter(d => !d.ok);
       detalleHtml = `<p class="text-xs text-slate-600 mb-2">Se confirmaron ${confirmadas.length} de ${data.totalSolicitadas} sesión(es) solicitadas.</p>`;
-      if (fallidas.length) detalleHtml += `<p class="text-xs text-red-600 mb-2">⚠️ No se pudieron confirmar ${fallidas.length} sesión(es) (cupo o huellas agotadas).</p>`;
+      if (fallidas.length) detalleHtml += `<p class="text-xs text-red-600 mb-2">⚠️ No se pudieron confirmar ${fallidas.length} sesión(es) (cupo lleno, huellas agotadas, o ya tenías un registro para esa fecha).</p>`;
     } else {
       detalleHtml = `<p class="text-xs text-slate-600 mb-2">${escapeHtml(data.mensaje || "")}</p>`;
     }
