@@ -3113,12 +3113,15 @@ function renderModalEventoRegistro() {
       registros.forEach(r => {
         const cfg = CATEGORIAS[r.categoria];
         const fechaDate = parseFechaLocal(r.fechaSesion);
+        const nombreDia = DIAS_SEMANA_LARGOS[fechaDate.getDay()].slice(0, 3);
+        const eventoCompleto = buscarEventoPorId(r.eventoId, r.categoria);
+        const actividad = eventoCompleto ? actividadDelDia(eventoCompleto, fechaDate) : "";
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-3 py-2.5 transition";
         btn.innerHTML = `
           <p class="text-sm font-bold text-slate-800">${cfg ? cfg.emoji : "📌"} ${escapeHtml(r.nombreEvento)}</p>
-          <p class="text-[11px] text-slate-500">${formatearFecha(fechaDate)}${r.numAcompanantes > 0 ? ` · 👥 +${r.numAcompanantes} acompañante(s)` : ""}</p>
+          <p class="text-[11px] text-slate-500">${nombreDia} ${formatearFecha(fechaDate)}${actividad ? ` — ${escapeHtml(actividad)}` : ""}${r.numAcompanantes > 0 ? ` · 👥 +${r.numAcompanantes} acompañante(s)` : ""}</p>
         `;
         btn.addEventListener("click", () => { regModal.registroSeleccionado = r; regModal.errorFormulario = null; regModal.paso = "detalle_registro"; renderModalEventoRegistro(); });
         cont.appendChild(btn);
@@ -3133,10 +3136,13 @@ function renderModalEventoRegistro() {
     const r = regModal.registroSeleccionado;
     const cfg = CATEGORIAS[r.categoria];
     const fechaDate = parseFechaLocal(r.fechaSesion);
+    const nombreDia = DIAS_SEMANA_LARGOS[fechaDate.getDay()];
+    const eventoCompleto = buscarEventoPorId(r.eventoId, r.categoria);
+    const actividad = eventoCompleto ? actividadDelDia(eventoCompleto, fechaDate) : "";
     body.innerHTML = `
       <div class="bg-slate-50 border border-slate-100 rounded-lg p-3 mb-3 text-xs text-slate-700 space-y-1">
         <p class="text-sm font-bold text-slate-800">${cfg ? cfg.emoji : "📌"} ${escapeHtml(r.nombreEvento)}</p>
-        <p><strong>Fecha:</strong> ${formatearFecha(fechaDate)}</p>
+        <p><strong>Fecha:</strong> ${nombreDia} ${formatearFecha(fechaDate)}${actividad ? ` — <strong>${escapeHtml(actividad)}</strong>` : ""}</p>
         <p><strong>Asistente:</strong> ${escapeHtml(r.nombre)}</p>
         <p><strong>Acompañantes:</strong> ${r.numAcompanantes || 0}${r.nombresAcompanantes ? " — " + escapeHtml(r.nombresAcompanantes) : ""}</p>
         <p><strong>Estado:</strong> ${escapeHtml(r.estado)}${r.tieneCosto ? ` · Pago: ${r.estadoPago === "Pagado" ? "Pagado" : "Pendiente"}` : ""}</p>
