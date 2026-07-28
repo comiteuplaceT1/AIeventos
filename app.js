@@ -14,7 +14,7 @@ const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7
 
 // ⚠️ COPIA AQUÍ EL LINK DE IMPLEMENTACIÓN DE TU GOOGLE APPS SCRIPT (APLICACIÓN WEB /EXEC)
 // Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con Gemini.
-const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbytNdbJdWQNqTzEg9cN_6PYbmSPZwHzv06nyN3O7tK_BH0RWuVidddKolOPoXdP52U/exec";
+const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbw6D3LV644Xg0iii26l_4km5YncJ1sjKM24d3uRUsPCTU5bij52VbCEBu-2ZfiIOIZ6/exec";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -1669,7 +1669,7 @@ async function procesarMensajeUsuario(txt) {
     return;
   }
 
-  const respuestaSinMatch = `🤔 No pude generarte una respuesta para eso ahora mismo. Puedo ayudarte con:\n\n🎟️ *Gestionar Eventos* — para registrarte, consultar o cancelar\n🎈 *"Eventos de hoy"* — qué hay programado hoy\n📅 *"Eventos de la Semana"* — agenda completa\n🔍 El *nombre de un evento* (ej. "días y horario de Zumba")\n\n📂 También puedes usar el menú de la izquierda por categoría.\n\n¿Qué te gustaría hacer?` + "\n\n" + mensajeBotonesBienvenida();
+  const respuestaSinMatch = `🙂 No tengo esa información a la mano en este momento, pero aquí tienes otras formas de encontrar lo que buscas:\n\n🎟️ *Gestionar Eventos* — para registrarte, consultar o cancelar\n🎈 *"Eventos de hoy"* — qué hay programado hoy\n📅 *"Eventos de la Semana"* — agenda completa\n🔍 El *nombre de un evento* (ej. "días y horario de Zumba")\n\n📂 También puedes usar el menú de la izquierda por categoría.\n\n¿Qué te gustaría hacer?` + "\n\n" + mensajeBotonesBienvenida();
   addMessage(respuestaSinMatch, "bot");
 }
 
