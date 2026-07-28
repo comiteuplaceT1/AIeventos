@@ -335,6 +335,7 @@ async function inicializar() {
       addMessage(`👋 *¡Hola! Bienvenido a Eventos Comunitarios de Uplace.*\n\nSoy tu *Agente de Eventos*. Aquí puedes:\n\n🎟️ *Registrarte* a un evento, *consultar* tus registros o *cancelarlos*, todo desde el botón "Gestionar Eventos" (abajo)\n📂 Ver eventos por categoría en el *menú de la izquierda*, en el celular, tócalo con el ícono ☰ de la esquina superior izquierda de la pantalla\n🎈 Ver los eventos de *hoy* o de la *semana*\n📆 Abrir el Calendario Mensual para ver todo lo programado este mes y los siguientes\n🔍 Preguntar por un evento específico (ej. "¿qué días y horario tiene Zumba?")\n🤖 Hacerme preguntas más abiertas sobre los eventos (ej. "¿hay algo para niños?", "¿qué eventos gratuitos hay?"), tengo IA y te ayudo a encontrar lo que buscas\n💳 Si el evento tiene costo, puedes registrarte con el pago *pendiente* y subir tu comprobante después, el Comité lo revisa y aprueba\n🚫 Si tu depto tiene *adeudos* con la administración, no podrás registrarte a eventos hasta regularizarlo\n⚠️ Si faltas a un evento sin cancelar a tiempo, a la *2ª vez* el sistema puede bloquear tus nuevos registros\n\nElige una opción o escríbeme lo que necesites:`, "bot");
       addMessage(mensajeBotonesBienvenida(), "bot");
     }
+  
   } catch (error) {
     console.error("Error cargando los datos desde Google Sheets:", error);
   }
@@ -631,8 +632,32 @@ function inyectarSubmenuEventos(idContenedor, eventos, categoria, emoji) {
     const recurrente = esRecurrente(evento);
     const esImpacto = evento.categoria === "Impacto";
     const sinFecha = !tieneFechaDefinida(evento);
-    const badgeTexto = sinFecha ? "📅 Fecha por definir" : (esImpacto ? "" : (recurrente ? infoCupoResumenRecurrente(evento).texto : cupoInfo(evento, evento.fecha).texto));
-    const badgeLleno = sinFecha ? false : (esImpacto ? false : (recurrente ? infoCupoResumenRecurrente(evento).lleno : cupoInfo(evento, evento.fecha).lleno));
+    let badgeTexto = "";
+    let badgeColorClass = "text-emerald-600";
+    if (sinFecha) {
+      badgeTexto = "📅 Fecha por definir";
+      badgeColorClass = "text-amber-600";
+    } else if (esImpacto) {
+      if (recurrente) {
+        const ocurrenciasMes = ocurrenciasDelMesActual(evento);
+        if (ocurrenciasMes.length) {
+          badgeTexto = `Sesiones disponibles este mes de ${MESES_LARGOS[new Date().getMonth()]}`;
+          badgeColorClass = "text-emerald-600";
+        } else {
+          badgeTexto = mensajeSinSesionesEsteMes(evento);
+          badgeColorClass = "text-amber-600";
+        }
+      }
+      // Impacto de fecha única (no recurrente): sin badge, no aplica cupo ni disponibilidad mensual.
+    } else if (recurrente) {
+      const info = infoCupoResumenRecurrente(evento);
+      badgeTexto = info.texto;
+      badgeColorClass = info.lleno ? "text-red-500" : "text-emerald-600";
+    } else {
+      const info = cupoInfo(evento, evento.fecha);
+      badgeTexto = info.texto;
+      badgeColorClass = info.lleno ? "text-red-500" : "text-emerald-600";
+    }
     const btn = document.createElement("button");
     btn.type = "button";
     // Antes el nombre iba en una sola línea con "truncate" + un tooltip que solo
@@ -643,7 +668,7 @@ function inyectarSubmenuEventos(idContenedor, eventos, categoria, emoji) {
     btn.className = "group relative w-full text-left px-3 py-2 rounded-lg transition font-medium border-l-2 border-transparent hover:bg-slate-50 hover:border-brand-500";
     btn.innerHTML = `
       <span class="block text-sm text-slate-700 group-hover:text-slate-900 leading-snug break-words">${emoji} ${escapeHtml(evento.nombre)}</span>
-      ${badgeTexto ? `<span class="block mt-0.5 text-[10px] font-bold ${sinFecha ? 'text-amber-600' : (badgeLleno ? 'text-red-500' : 'text-emerald-600')}">${badgeTexto}</span>` : ""}
+      ${badgeTexto ? `<span class="block mt-0.5 text-[10px] font-bold ${badgeColorClass}">${badgeTexto}</span>` : ""}
     `;
     btn.title = evento.nombre;
     btn.onclick = () => mostrarTarjetaEventoEnChat(evento);
