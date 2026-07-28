@@ -14,7 +14,7 @@ const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7
 
 // ⚠️ COPIA AQUÍ EL LINK DE IMPLEMENTACIÓN DE TU GOOGLE APPS SCRIPT (APLICACIÓN WEB /EXEC)
 // Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con Gemini.
-const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbyPYjWgymLfYvGM0R47UAAOD1tRkErHHQjyp9Jnd1d_Fvbemt1F8uKI_GxO-o8woWzs/exec";
+const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbwHk84Q61Z4Cfh-kqAWlQUZCeBLfKKAaDA-l4FZ1GqWSTpEOTDU48ZQAja8lq-OKYui/exec";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -27,6 +27,7 @@ const UBICACIONES = [
   "Alberca / Jacuzzi P6",
   "Chapoteadero P6",
   "Salón Yoga P6",
+  "Asadores P6",
   "Jardín P6",
   "Coffee Place PB",
   "Lobby PB",
@@ -524,7 +525,10 @@ function recurrenciaTexto(evento) {
   const tipo = tipoRecurrencia(evento);
   const fin = evento.fechafin ? formatearFecha(parseFechaLocal(evento.fechafin)) : "sin fecha fin definida";
   if (tipo === "semanal") return `🔁 Se repite: ${evento.diasemana.join(", ")} · hasta ${fin}`;
-  if (tipo === "quincenal") return `🔁 Se repite cada 15 días · hasta ${fin}`;
+  if (tipo === "quincenal") {
+    const diaSemanaInicio = DIAS_SEMANA_LARGOS[parseFechaLocal(evento.fecha).getDay()];
+    return `🔁 Se repite cada 2 semanas, los ${diaSemanaInicio} · hasta ${fin}`;
+  }
   if (tipo === "mensual") return `🔁 Se repite cada mes (mismo día) · hasta ${fin}`;
   if (tipo === "mensual_nth") {
     const partes = String(evento.recurrenciadetalle || "").split("-");
@@ -1719,7 +1723,7 @@ function camposFormularioEvento(v) {
         <select id="fTipoRecurrencia" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mb-2">
           <option value="">No, es un evento único</option>
           <option value="semanal" ${tipoRecInicial === "semanal" ? "selected" : ""}>Semanal (elige días, ej. Zumba Lun/Mié/Sáb)</option>
-          <option value="quincenal" ${tipoRecInicial === "quincenal" ? "selected" : ""}>Cada 15 días</option>
+          <option value="quincenal" ${tipoRecInicial === "quincenal" ? "selected" : ""}>Cada 2 semanas (mismo día que la fecha de inicio, ej. cada 2 viernes)</option>
           <option value="mensual" ${tipoRecInicial === "mensual" ? "selected" : ""}>Cada mes (mismo día de mes)</option>
           <option value="mensual_nth" ${tipoRecInicial === "mensual_nth" ? "selected" : ""}>Cada mes, un día específico (ej. tercer domingo)</option>
         </select>
