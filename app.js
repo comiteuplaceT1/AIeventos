@@ -14,7 +14,7 @@ const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7
 
 // ⚠️ COPIA AQUÍ EL LINK DE IMPLEMENTACIÓN DE TU GOOGLE APPS SCRIPT (APLICACIÓN WEB /EXEC)
 // Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con Gemini.
-const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbyXbow5iVZVHSvgeiuioNbGvdM4P7X6T6QIz6280YkzlgoexZLqWc9YHO7r7dloRRHy/exec";
+const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbyLdg8P5WIFVLIzPToO2NhsLYT3176XUaHOPkpyKDilyCL-RoMY3I6qDL-AexdlP6nU/exec";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -335,7 +335,6 @@ async function inicializar() {
       addMessage(`👋 *¡Hola! Bienvenido a Eventos Comunitarios de Uplace.*\n\nSoy tu *Agente de Eventos*. Aquí puedes:\n\n🎟️ *Registrarte* a un evento, *consultar* tus registros o *cancelarlos*, todo desde el botón "Gestionar Eventos" (abajo)\n📂 Ver eventos por categoría en el *menú de la izquierda*, en el celular, tócalo con el ícono ☰ de la esquina superior izquierda de la pantalla\n🎈 Ver los eventos de *hoy* o de la *semana*\n📆 Abrir el Calendario Mensual para ver todo lo programado este mes y los siguientes\n🔍 Preguntar por un evento específico (ej. "¿qué días y horario tiene Zumba?")\n🤖 Hacerme preguntas más abiertas sobre los eventos (ej. "¿hay algo para niños?", "¿qué eventos gratuitos hay?"), tengo IA y te ayudo a encontrar lo que buscas\n💳 Si el evento tiene costo, puedes registrarte con el pago *pendiente* y subir tu comprobante después, el Comité lo revisa y aprueba\n🚫 Si tu depto tiene *adeudos* con la administración, no podrás registrarte a eventos hasta regularizarlo\n⚠️ Si faltas a un evento sin cancelar a tiempo, a la *2ª vez* el sistema puede bloquear tus nuevos registros\n\nElige una opción o escríbeme lo que necesites:`, "bot");
       addMessage(mensajeBotonesBienvenida(), "bot");
     }
-  
   } catch (error) {
     console.error("Error cargando los datos desde Google Sheets:", error);
   }
@@ -513,11 +512,21 @@ function generarOcurrenciasEnRango(evento, rangoInicio, rangoFin) {
 
 // Ocurrencias de un evento recurrente dentro del mes calendario en curso (a partir de
 // hoy), respetando FechaFin si es antes de que termine el mes.
+// Ventana de fechas disponibles para REGISTRARSE: normalmente el mes en curso.
+// Pero si ya faltan 7 días o menos para que termine el mes, se abre el mes
+// SIGUIENTE completo (todas sus sesiones, no solo la primera) — así, si las
+// clases de agosto son de pago, el residente ya puede ir registrándose y
+// subiendo su comprobante desde antes, sin esperar a que empiece agosto. A los
+// 8 días o más antes de fin de mes, todavía NO se abre el mes siguiente.
 function ocurrenciasDelMesActual(evento) {
   const hoy = hoyMedianoche();
-  const finMes = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0, 12, 0, 0);
-  const finSerie = evento.fechafin ? parseFechaLocal(evento.fechafin) : finMes;
-  const limite = finSerie < finMes ? finSerie : finMes;
+  const finMesActual = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0, 12, 0, 0);
+  const diasParaFinDeMes = Math.round((finMesActual - hoy) / 86400000);
+  const limiteVentana = diasParaFinDeMes <= 7
+    ? new Date(hoy.getFullYear(), hoy.getMonth() + 2, 0, 12, 0, 0) // fin del mes SIGUIENTE
+    : finMesActual;
+  const finSerie = evento.fechafin ? parseFechaLocal(evento.fechafin) : limiteVentana;
+  const limite = finSerie < limiteVentana ? finSerie : limiteVentana;
   return generarOcurrenciasEnRango(evento, hoy, limite);
 }
 
@@ -1951,6 +1960,7 @@ function renderAdminPanel() {
         <button id="adminBtnCancelar" class="w-full bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-lg py-2.5 transition">🛑 Cancelar evento</button>
         <button id="adminBtnAprobarPagos" class="w-full bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-lg py-2.5 transition">💳 Aprobar registros de pago</button>
         <button id="adminBtnAsistencias" class="w-full bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-lg py-2.5 transition">📋 Asistencias y bloqueados</button>
+        <button id="adminBtnVerCupo" class="w-full bg-cyan-700 hover:bg-cyan-800 text-white text-sm font-bold rounded-lg py-2.5 transition">📊 Cupo del mes por evento</button>
         <button id="adminBtnVerFeedback" class="w-full bg-slate-600 hover:bg-slate-700 text-white text-sm font-bold rounded-lg py-2.5 transition">💬 Ver Feedback / Contacto</button>
         <button id="adminBtnBajaResidente" class="w-full bg-slate-700 hover:bg-slate-800 text-white text-sm font-bold rounded-lg py-2.5 transition">🙅 Dar de baja a un residente</button>
       </div>
@@ -1958,8 +1968,9 @@ function renderAdminPanel() {
     document.getElementById("adminBtnCrear").addEventListener("click", () => { adminState.paso = "crear"; renderAdminPanel(); });
     document.getElementById("adminBtnModificar").addEventListener("click", () => { adminState.paso = "modificar_categoria"; renderAdminPanel(); });
     document.getElementById("adminBtnCancelar").addEventListener("click", () => { adminState.paso = "cancelar_categoria"; renderAdminPanel(); });
-    document.getElementById("adminBtnAprobarPagos").addEventListener("click", () => { adminState.paso = "aprobar_lista"; renderAdminPanel(); cargarPendientes(); });
+    document.getElementById("adminBtnAprobarPagos").addEventListener("click", () => { adminState.paso = "aprobar_lista"; adminState.mesPendientes = null; renderAdminPanel(); });
     document.getElementById("adminBtnAsistencias").addEventListener("click", () => { adminState.paso = "asistencias_menu"; renderAdminPanel(); });
+    document.getElementById("adminBtnVerCupo").addEventListener("click", () => { adminState.paso = "cupo_categoria"; renderAdminPanel(); });
     document.getElementById("adminBtnVerFeedback").addEventListener("click", () => { adminState.paso = "feedback_lista"; renderAdminPanel(); });
     document.getElementById("adminBtnBajaResidente").addEventListener("click", () => { adminState.paso = "baja_categoria"; renderAdminPanel(); });
     return;
@@ -2069,11 +2080,19 @@ function renderAdminPanel() {
 
   // ---- Aprobar registros de pago ----
   if (adminState.paso === "aprobar_lista") {
+    adminState.mesPendientes = adminState.mesPendientes || new Date().toISOString().slice(0, 7);
     body.innerHTML = `
       <p class="text-xs text-slate-500 mb-2">Registros de eventos con costo esperando confirmación de pago.</p>
-      <div id="listaPendientes" class="space-y-2 max-h-[55vh] overflow-y-auto pr-1"><p class="text-xs text-slate-400">Cargando…</p></div>
+      <div class="flex items-center justify-between mb-2 bg-slate-50 border border-slate-100 rounded-lg px-2 py-1.5">
+        <button id="adminBtnMesPendAnterior" class="px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-xs transition">← Mes ant.</button>
+        <span class="text-xs font-bold text-slate-700">${adminState.mesPendientes}</span>
+        <button id="adminBtnMesPendSiguiente" class="px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-xs transition">Mes sig. →</button>
+      </div>
+      <div id="listaPendientes" class="space-y-2 max-h-[50vh] overflow-y-auto pr-1"><p class="text-xs text-slate-400">Cargando…</p></div>
       <button id="adminBtnVolverMenuAprobar" class="w-full mt-3 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-lg py-2 transition">← Volver</button>
     `;
+    document.getElementById("adminBtnMesPendAnterior").addEventListener("click", () => cambiarMesPendientes(-1));
+    document.getElementById("adminBtnMesPendSiguiente").addEventListener("click", () => cambiarMesPendientes(1));
     document.getElementById("adminBtnVolverMenuAprobar").addEventListener("click", () => { adminState.paso = "menu"; renderAdminPanel(); });
     cargarPendientes();
     return;
@@ -2083,7 +2102,7 @@ function renderAdminPanel() {
   if (adminState.paso === "asistencias_menu") {
     body.innerHTML = `
       <div class="space-y-2">
-        <button id="adminBtnVerAsistenciasMes" class="w-full bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-lg py-2.5 transition">📅 Registros del mes (marcar asistencia)</button>
+        <button id="adminBtnVerAsistenciasMes" class="w-full bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-lg py-2.5 transition">📅 Cupo y registros del mes</button>
         <button id="adminBtnVerBloqueados" class="w-full bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold rounded-lg py-2.5 transition">🚫 Ver bloqueados</button>
       </div>
       <button id="adminBtnVolverMenuAsist" class="w-full mt-3 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-lg py-2 transition">← Volver</button>
@@ -2135,6 +2154,100 @@ function renderAdminPanel() {
     `;
     document.getElementById("adminBtnVolverMenuFeedback").addEventListener("click", () => { adminState.paso = "menu"; renderAdminPanel(); });
     cargarFeedback();
+    return;
+  }
+
+  // ---- Cupo del mes por evento: elegir categoría ----
+  if (adminState.paso === "cupo_categoria") {
+    body.innerHTML = `
+      <p class="text-sm text-slate-600 mb-3">¿De qué categoría es el evento?</p>
+      <div class="space-y-2">
+        ${Object.keys(CATEGORIAS).map(c => `<button class="admin-cat-btn w-full text-left bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg px-3 py-2.5 transition" data-cat="${c}">${CATEGORIAS[c].emoji} ${CATEGORIAS[c].labelSidebar}</button>`).join("")}
+      </div>
+      <button id="adminBtnVolverMenuCupo" class="w-full mt-3 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-lg py-2 transition">← Volver</button>
+    `;
+    document.querySelectorAll(".admin-cat-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        adminState.categoria = btn.getAttribute("data-cat");
+        adminState.paso = "cupo_evento";
+        renderAdminPanel();
+      });
+    });
+    document.getElementById("adminBtnVolverMenuCupo").addEventListener("click", () => { adminState.paso = "menu"; renderAdminPanel(); });
+    return;
+  }
+
+  // ---- Cupo del mes por evento: elegir el evento ----
+  if (adminState.paso === "cupo_evento") {
+    const activos = (DATA[adminState.categoria] || []).filter(e => e.estado.toLowerCase() === "activo")
+      .sort((a, b) => parseFechaLocal(a.fecha) - parseFechaLocal(b.fecha));
+    body.innerHTML = `
+      <p class="text-sm text-slate-600 mb-3">¿De qué evento quieres ver el cupo?</p>
+      <div class="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
+        ${activos.length ? activos.map(ev => `
+          <button class="admin-ev-cupo-btn w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-3 py-2 transition" data-id="${ev.eventoid}">
+            <span class="font-bold text-slate-800 text-sm block">${esRecurrente(ev) ? "🔁 " : ""}${escapeHtml(ev.nombre)}</span>
+            <span class="text-xs text-slate-500">${ev.fecha || "Sin fecha"} · ${escapeHtml(ev.ubicacion || "N/A")}</span>
+          </button>`).join("")
+          : `<p class="text-xs text-slate-400">No hay eventos activos en esta categoría.</p>`}
+      </div>
+      <button id="adminBtnVolverCatCupo" class="w-full mt-3 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-lg py-2 transition">← Volver</button>
+    `;
+    document.querySelectorAll(".admin-ev-cupo-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        adminState.evento = activos.find(e => e.eventoid === btn.getAttribute("data-id"));
+        adminState.paso = "cupo_sesiones";
+        renderAdminPanel();
+      });
+    });
+    document.getElementById("adminBtnVolverCatCupo").addEventListener("click", () => { adminState.paso = "cupo_categoria"; renderAdminPanel(); });
+    return;
+  }
+
+  // ---- Cupo del mes por evento: lista de sesiones del mes con su cupo ----
+  if (adminState.paso === "cupo_sesiones") {
+    const ev = adminState.evento;
+    const fechas = esRecurrente(ev) ? ocurrenciasDelMesActual(ev).map(f => fechaISO(f)) : (tieneFechaDefinida(ev) ? [ev.fecha] : []);
+    body.innerHTML = `
+      <p class="text-sm font-bold text-slate-800 mb-1">${escapeHtml(ev.nombre)}</p>
+      <p class="text-xs text-slate-500 mb-3">Sesiones de este mes y su cupo — toca una para ver quién está registrado.</p>
+      <div class="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
+        ${fechas.length ? fechas.map(f => {
+          const info = cupoInfo(ev, f);
+          const fechaDate = parseFechaLocal(f);
+          const nombreDia = DIAS_SEMANA_LARGOS[fechaDate.getDay()];
+          return `<button class="admin-sesion-btn w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-3 py-2.5 transition" data-fecha="${f}">
+            <span class="font-bold text-slate-800 text-sm block">${nombreDia.slice(0, 3)} ${formatearFecha(fechaDate)}</span>
+            <span class="text-xs font-bold ${info.lleno ? "text-red-500" : "text-emerald-600"}">${info.lleno ? "🔴" : "🟢"} ${info.texto}</span>
+          </button>`;
+        }).join("") : `<p class="text-xs text-slate-400">${mensajeSinSesionesEsteMes(ev)}.</p>`}
+      </div>
+      <button id="adminBtnVolverEventoCupo" class="w-full mt-3 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-lg py-2 transition">← Volver</button>
+    `;
+    document.querySelectorAll(".admin-sesion-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        adminState.fechaSesionCupo = btn.getAttribute("data-fecha");
+        adminState.paso = "cupo_sesion_detalle";
+        renderAdminPanel();
+      });
+    });
+    document.getElementById("adminBtnVolverEventoCupo").addEventListener("click", () => { adminState.paso = "cupo_evento"; renderAdminPanel(); });
+    return;
+  }
+
+  // ---- Cupo del mes por evento: detalle de una sesión (quién está registrado) ----
+  if (adminState.paso === "cupo_sesion_detalle") {
+    const ev = adminState.evento;
+    const fecha = adminState.fechaSesionCupo;
+    const fechaDate = parseFechaLocal(fecha);
+    body.innerHTML = `
+      <p class="text-sm font-bold text-slate-800 mb-1">${escapeHtml(ev.nombre)}</p>
+      <p class="text-xs text-slate-500 mb-3">${DIAS_SEMANA_LARGOS[fechaDate.getDay()]} ${formatearFecha(fechaDate)}</p>
+      <div id="listaCupoSesion" class="space-y-2 max-h-[50vh] overflow-y-auto pr-1"><p class="text-xs text-slate-400">Cargando…</p></div>
+      <button id="adminBtnVolverSesionesCupo" class="w-full mt-3 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-lg py-2 transition">← Volver</button>
+    `;
+    document.getElementById("adminBtnVolverSesionesCupo").addEventListener("click", () => { adminState.paso = "cupo_sesiones"; renderAdminPanel(); });
+    cargarRegistrosSesion();
     return;
   }
 
@@ -2441,11 +2554,19 @@ async function marcarFeedbackRevisadoAdmin(feedbackId) {
   }
 }
 
+function cambiarMesPendientes(delta) {
+  const [y, m] = adminState.mesPendientes.split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  adminState.mesPendientes = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  renderAdminPanel();
+}
+
 async function cargarPendientes() {
   const cont = document.getElementById("listaPendientes");
   if (cont) cont.innerHTML = `<p class="text-xs text-slate-400">Cargando…</p>`;
   try {
-    const res = await fetch(`${URL_AGENTE_EVENTOS}?accion=listar_pendientes&pin=${encodeURIComponent(adminState.pin)}`, { cache: "no-store" });
+    const url = `${URL_AGENTE_EVENTOS}?accion=listar_pendientes&pin=${encodeURIComponent(adminState.pin)}&mes=${encodeURIComponent(adminState.mesPendientes)}`;
+    const res = await fetch(url, { cache: "no-store" });
     const data = await res.json();
     if (!data.ok) { if (cont) cont.innerHTML = `<p class="text-xs text-red-600">${escapeHtml(data.error || "Error al cargar.")}</p>`; return; }
     adminState.pendientes = data.pendientes || [];
@@ -2459,7 +2580,7 @@ function renderListaPendientes() {
   const cont = document.getElementById("listaPendientes");
   if (!cont) return;
   const todos = adminState.pendientes || [];
-  if (!todos.length) { cont.innerHTML = `<p class="text-xs text-slate-400">Todavía no hay registros de eventos con costo.</p>`; return; }
+  if (!todos.length) { cont.innerHTML = `<p class="text-xs text-slate-400">No hay registros de eventos con costo en ${adminState.mesPendientes}.</p>`; return; }
 
   const pendientes = todos.filter(p => p.estado === "Pendiente");
   const aprobados = todos.filter(p => p.estado === "Aprobado");
@@ -2538,18 +2659,80 @@ function renderListaAsistenciasMes() {
   if (!cont) return;
   const registros = adminState.registrosMes || [];
   if (!registros.length) { cont.innerHTML = `<p class="text-xs text-slate-400">No hay registros ese mes.</p>`; return; }
-  cont.innerHTML = registros.map(r => `
-    <div class="bg-slate-50 border border-slate-200 rounded-lg p-3">
-      <p class="text-sm font-bold text-slate-800">${escapeHtml(r.nombreEvento)}</p>
-      <p class="text-xs text-slate-500">${escapeHtml(r.fechaSesion)} · Depto ${escapeHtml(r.depto)} · ${escapeHtml(r.nombre)}${r.numAcompanantes > 0 ? ` +${r.numAcompanantes} acomp.` : ""} · <span class="font-bold">${escapeHtml(r.estado)}</span></p>
-      <div class="flex gap-2 mt-2">
-        <button class="btnAsistioSi flex-1 ${r.asistio === "Si" ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-700"} hover:bg-emerald-600 hover:text-white text-xs font-bold rounded-lg py-2 transition" data-id="${r.registroId}">✅ Asistió</button>
-        <button class="btnAsistioNo flex-1 ${r.asistio === "No" ? "bg-red-600 text-white" : "bg-red-50 text-red-700"} hover:bg-red-600 hover:text-white text-xs font-bold rounded-lg py-2 transition" data-id="${r.registroId}">❌ No asistió</button>
+
+  // Agrupar por evento + fecha de sesión para mostrar el cupo real de cada
+  // sesión (cruzando con los datos de eventos ya cargados en el sidebar) y
+  // quién específicamente (depto + nombre) está anotado en ella.
+  const grupos = {};
+  registros.forEach(r => {
+    const key = r.eventoId + "|" + r.fechaSesion;
+    if (!grupos[key]) grupos[key] = { nombreEvento: r.nombreEvento, categoria: r.categoria, eventoId: r.eventoId, fechaSesion: r.fechaSesion, items: [] };
+    grupos[key].items.push(r);
+  });
+  const gruposArr = Object.values(grupos).sort((a, b) => a.fechaSesion.localeCompare(b.fechaSesion));
+
+  cont.innerHTML = gruposArr.map(g => {
+    const evento = buscarEventoPorId(g.eventoId, g.categoria);
+    const confirmados = g.items.reduce((acc, r) => acc + 1 + (r.numAcompanantes || 0), 0);
+    const cupoRaw = evento ? String(evento.cupototal || "").trim() : "";
+    const sinLimite = g.categoria === "Impacto" || cupoRaw === "";
+    const cupoTexto = sinLimite ? `${confirmados} registrado(s) (sin límite)` : `Cupo: ${confirmados}/${cupoRaw}`;
+    const fechaDate = parseFechaLocal(g.fechaSesion);
+    const nombreDia = DIAS_SEMANA_LARGOS[fechaDate.getDay()].slice(0, 3);
+
+    const filas = g.items.map(r => `
+      <div class="border-t border-slate-200 pt-2 mt-2 first:border-t-0 first:pt-0 first:mt-0">
+        <p class="text-xs text-slate-700"><strong>Depto ${escapeHtml(r.depto)}</strong> · ${escapeHtml(r.nombre)}${r.numAcompanantes > 0 ? ` +${r.numAcompanantes} acomp. (${escapeHtml(r.nombresAcompanantes || "")})` : ""} · <span class="font-bold">${escapeHtml(r.estado)}</span></p>
+        <div class="flex gap-1.5 mt-1 flex-wrap">
+          <button class="btnAsistioSi ${r.asistio === "Si" ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-700"} hover:bg-emerald-600 hover:text-white text-[11px] font-bold rounded-lg px-2 py-1.5 transition" data-id="${r.registroId}">✅ Asistió</button>
+          <button class="btnAsistioNo ${r.asistio === "No" ? "bg-red-600 text-white" : "bg-red-50 text-red-700"} hover:bg-red-600 hover:text-white text-[11px] font-bold rounded-lg px-2 py-1.5 transition" data-id="${r.registroId}">❌ No asistió</button>
+          <button class="btnBajaAdmin bg-slate-700 hover:bg-slate-800 text-white text-[11px] font-bold rounded-lg px-2 py-1.5 transition" data-id="${r.registroId}">🗑️ Dar de baja</button>
+          <button class="btnBloquearAdmin bg-red-700 hover:bg-red-800 text-white text-[11px] font-bold rounded-lg px-2 py-1.5 transition" data-depto="${escapeHtml(r.depto)}" data-nombre="${escapeHtml(r.nombre)}">🚫 Bloquear</button>
+        </div>
       </div>
-    </div>
-  `).join("");
+    `).join("");
+
+    return `
+      <div class="bg-slate-50 border border-slate-200 rounded-lg p-3">
+        <p class="text-sm font-bold text-slate-800">${escapeHtml(g.nombreEvento)}</p>
+        <p class="text-xs text-slate-500 mb-1">${nombreDia} ${formatearFecha(fechaDate)} · <span class="font-bold text-brand-700">${cupoTexto}</span></p>
+        ${filas}
+      </div>
+    `;
+  }).join("");
+
   document.querySelectorAll(".btnAsistioSi").forEach(btn => btn.addEventListener("click", () => marcarAsistenciaAdmin(btn.getAttribute("data-id"), "Si")));
   document.querySelectorAll(".btnAsistioNo").forEach(btn => btn.addEventListener("click", () => marcarAsistenciaAdmin(btn.getAttribute("data-id"), "No")));
+  document.querySelectorAll(".btnBajaAdmin").forEach(btn => btn.addEventListener("click", () => darDeBajaRegistroAdmin(btn.getAttribute("data-id"))));
+  document.querySelectorAll(".btnBloquearAdmin").forEach(btn => btn.addEventListener("click", () => bloquearManualAdmin(btn.getAttribute("data-depto"), btn.getAttribute("data-nombre"))));
+}
+
+async function darDeBajaRegistroAdmin(registroId) {
+  if (!confirm("¿Confirmas dar de baja este registro? El lugar quedará libre de inmediato.")) return;
+  try {
+    const url = `${URL_AGENTE_EVENTOS}?accion=admin_cancelar_registro&pin=${encodeURIComponent(adminState.pin)}&registroId=${encodeURIComponent(registroId)}`;
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json();
+    if (!data.ok) { alert(data.error || "No se pudo dar de baja."); return; }
+    adminState.registrosMes = (adminState.registrosMes || []).filter(r => r.registroId !== registroId);
+    renderListaAsistenciasMes();
+    refrescarRegistrosYCupos();
+  } catch (e) {
+    alert("Error de conexión.");
+  }
+}
+
+async function bloquearManualAdmin(depto, nombre) {
+  if (!confirm(`¿Confirmas bloquear a ${nombre} (depto ${depto}) para nuevos registros a eventos?`)) return;
+  try {
+    const url = `${URL_AGENTE_EVENTOS}?accion=bloquear_manual&pin=${encodeURIComponent(adminState.pin)}&depto=${encodeURIComponent(depto)}&nombre=${encodeURIComponent(nombre)}&motivo=${encodeURIComponent("Bloqueado manualmente desde el panel de asistencias")}`;
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json();
+    if (!data.ok) { alert(data.error || "No se pudo bloquear."); return; }
+    alert(`${nombre} (depto ${depto}) fue bloqueado.`);
+  } catch (e) {
+    alert("Error de conexión.");
+  }
 }
 
 async function marcarAsistenciaAdmin(registroId, asistio) {
@@ -2569,6 +2752,72 @@ async function marcarAsistenciaAdmin(registroId, asistio) {
 }
 
 // ---------- Bloqueados ----------
+// ---------- Cupo del mes por evento: detalle de sesión ----------
+async function cargarRegistrosSesion() {
+  const cont = document.getElementById("listaCupoSesion");
+  if (cont) cont.innerHTML = `<p class="text-xs text-slate-400">Cargando…</p>`;
+  try {
+    const ev = adminState.evento;
+    const url = `${URL_AGENTE_EVENTOS}?accion=listar_registros_sesion&pin=${encodeURIComponent(adminState.pin)}&eventoId=${encodeURIComponent(ev.eventoid)}&fechaSesion=${encodeURIComponent(adminState.fechaSesionCupo)}`;
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json();
+    if (!data.ok) { if (cont) cont.innerHTML = `<p class="text-xs text-red-600">${escapeHtml(data.error || "Error")}</p>`; return; }
+    adminState.registrosSesion = data.registros || [];
+    renderListaCupoSesion();
+  } catch (e) {
+    if (cont) cont.innerHTML = `<p class="text-xs text-red-600">Error de conexión.</p>`;
+  }
+}
+
+function renderListaCupoSesion() {
+  const cont = document.getElementById("listaCupoSesion");
+  if (!cont) return;
+  const registros = adminState.registrosSesion || [];
+  if (!registros.length) { cont.innerHTML = `<p class="text-xs text-slate-400">Nadie registrado todavía en esta sesión.</p>`; return; }
+  cont.innerHTML = registros.map(r => `
+    <div class="bg-slate-50 border border-slate-200 rounded-lg p-3">
+      <p class="text-sm font-bold text-slate-800">Depto ${escapeHtml(r.depto)} · ${escapeHtml(r.nombre)}</p>
+      <p class="text-xs text-slate-500">${r.numAcompanantes > 0 ? `+${r.numAcompanantes} acomp. (${escapeHtml(r.nombresAcompanantes || "")})` : "Sin acompañantes"} · ${escapeHtml(r.estado)}${r.estadoPago ? ` · Pago: ${escapeHtml(r.estadoPago)}` : ""}</p>
+      <div class="flex gap-2 mt-2">
+        <button class="btnBajaRegistroAdmin flex-1 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg py-2 transition" data-id="${r.registroId}">🗑️ Dar de baja</button>
+        <button class="btnBloquearAdmin flex-1 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg py-2 transition" data-depto="${escapeHtml(r.depto)}" data-nombre="${escapeHtml(r.nombre)}">🚫 Bloquear</button>
+      </div>
+    </div>
+  `).join("");
+  document.querySelectorAll(".btnBajaRegistroAdmin").forEach(btn => btn.addEventListener("click", () => bajaRegistroDesdeAdmin(btn.getAttribute("data-id"))));
+  document.querySelectorAll(".btnBloquearAdmin").forEach(btn => btn.addEventListener("click", () => bloquearManualDesdeAdmin(btn.getAttribute("data-depto"), btn.getAttribute("data-nombre"))));
+}
+
+async function bajaRegistroDesdeAdmin(registroId) {
+  if (!confirm("¿Confirmas dar de baja este registro? El lugar quedará libre de inmediato.")) return;
+  try {
+    const url = `${URL_AGENTE_EVENTOS}?accion=baja_registro_admin&pin=${encodeURIComponent(adminState.pin)}&registroId=${encodeURIComponent(registroId)}`;
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json();
+    if (!data.ok) { alert(data.error || "No se pudo dar de baja."); return; }
+    adminState.registrosSesion = (adminState.registrosSesion || []).filter(r => r.registroId !== registroId);
+    renderListaCupoSesion();
+    refrescarRegistrosYCupos();
+  } catch (e) {
+    alert("Error de conexión.");
+  }
+}
+
+async function bloquearManualDesdeAdmin(depto, nombre) {
+  const motivo = prompt(`¿Motivo del bloqueo para ${nombre} (depto ${depto})? (opcional)`, "");
+  if (motivo === null) return; // canceló el prompt
+  if (!confirm(`¿Confirmas bloquear a ${nombre} (depto ${depto}) para nuevos registros?`)) return;
+  try {
+    const url = `${URL_AGENTE_EVENTOS}?accion=bloquear_manual&pin=${encodeURIComponent(adminState.pin)}&depto=${encodeURIComponent(depto)}&nombre=${encodeURIComponent(nombre)}&motivo=${encodeURIComponent(motivo || "")}`;
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json();
+    if (!data.ok) { alert(data.error || "No se pudo bloquear."); return; }
+    alert(`${nombre} (depto ${depto}) fue bloqueado. Puedes revertirlo desde "Asistencias y bloqueados" → "Ver bloqueados".`);
+  } catch (e) {
+    alert("Error de conexión.");
+  }
+}
+
 async function cargarBloqueados() {
   const cont = document.getElementById("listaBloqueados");
   if (cont) cont.innerHTML = `<p class="text-xs text-slate-400">Cargando…</p>`;
