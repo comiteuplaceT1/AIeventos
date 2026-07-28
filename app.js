@@ -14,7 +14,7 @@ const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7
 
 // ⚠️ COPIA AQUÍ EL LINK DE IMPLEMENTACIÓN DE TU GOOGLE APPS SCRIPT (APLICACIÓN WEB /EXEC)
 // Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con Gemini.
-const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbwhiLbBCvejHAeLqJw6Pi8G68ZtzhtrIrVuab-lqMpLvMlIxeR8fkryp3_eoWjsowL0/exec";
+const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbwi16vq3PoryB1WXSGX6IWkfzR6Z-ILeu8sMcW7yqITxke_KJPs6nYF7-ZC88MmEAkr/exec";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -1558,7 +1558,17 @@ window.cancelarMiRegistroDesdeChat = async function(depto, registroIdsCsv, etiqu
 async function preguntarAgenteIA(pregunta) {
   try {
     const url = `${URL_AGENTE_EVENTOS}?accion=chat&pregunta=${encodeURIComponent(pregunta)}`;
-    const res = await fetch(url, { method: "GET", cache: "no-store" });
+    // Sin esto, si OpenRouter está lento o rate-limited, el fetch se queda
+    // esperando indefinidamente y el residente ve "Consultando..." para
+    // siempre — a los 20s se aborta y cae al mensaje de ayuda de respaldo.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    let res;
+    try {
+      res = await fetch(url, { method: "GET", cache: "no-store", signal: controller.signal });
+    } finally {
+      clearTimeout(timeoutId);
+    }
     const data = await res.json();
 
     if (data.error) {
@@ -1575,7 +1585,11 @@ async function preguntarAgenteIA(pregunta) {
     }
     return data.respuesta_ia;
   } catch (error) {
-    console.error("Error de red al llamar al agente IA:", error);
+    if (error && error.name === "AbortError") {
+      console.error("Timeout esperando al agente IA (20s).");
+    } else {
+      console.error("Error de red al llamar al agente IA:", error);
+    }
     return null;
   }
 }
