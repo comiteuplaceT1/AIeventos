@@ -14,7 +14,7 @@ const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7
 
 // ⚠️ COPIA AQUÍ EL LINK DE IMPLEMENTACIÓN DE TU GOOGLE APPS SCRIPT (APLICACIÓN WEB /EXEC)
 // Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con Gemini.
-const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbyLdg8P5WIFVLIzPToO2NhsLYT3176XUaHOPkpyKDilyCL-RoMY3I6qDL-AexdlP6nU/exec";
+const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbwhiLbBCvejHAeLqJw6Pi8G68ZtzhtrIrVuab-lqMpLvMlIxeR8fkryp3_eoWjsowL0/exec";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -593,13 +593,29 @@ function crearSeccionMenu(titulo, idLista) {
 // PRÓXIMA sesión del mes con lugar disponible (no "Recurrente" a secas). Si
 // todas las sesiones restantes del mes están llenas, se marca como lleno.
 function infoCupoResumenRecurrente(evento) {
-  const ocurrencias = ocurrenciasDelMesActual(evento);
-  if (!ocurrencias.length) return { lleno: true, texto: mensajeSinSesionesEsteMes(evento) };
-  for (let i = 0; i < ocurrencias.length; i++) {
-    const info = cupoInfo(evento, fechaISO(ocurrencias[i]));
-    if (!info.lleno) return { lleno: false, texto: info.sinLimite ? info.texto : `${info.texto} (próx. sesión)` };
+  const hoy = hoyMedianoche();
+  const finMesActual = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0, 12, 0, 0);
+  const finSerieEsteMes = evento.fechafin ? parseFechaLocal(evento.fechafin) : finMesActual;
+  const limiteEsteMes = finSerieEsteMes < finMesActual ? finSerieEsteMes : finMesActual;
+  const ocurrenciasEsteMes = limiteEsteMes >= hoy ? generarOcurrenciasEnRango(evento, hoy, limiteEsteMes) : [];
+
+  if (ocurrenciasEsteMes.length) {
+    for (let i = 0; i < ocurrenciasEsteMes.length; i++) {
+      const info = cupoInfo(evento, fechaISO(ocurrenciasEsteMes[i]));
+      if (!info.lleno) return { lleno: false, texto: info.sinLimite ? info.texto : `${info.texto} (próx. sesión)` };
+    }
+    return { lleno: true, texto: "Cupo Lleno" };
   }
-  return { lleno: true, texto: "Cupo Lleno" };
+
+  // Sin sesiones en lo que queda de este mes: ¿ya se abrió el mes siguiente
+  // por la ventana de gracia de 7 días? (ocurrenciasDelMesActual la incluye).
+  const ocurrenciasConGracia = ocurrenciasDelMesActual(evento);
+  if (ocurrenciasConGracia.length) {
+    const mesSiguiente = MESES_LARGOS[(hoy.getMonth() + 1) % 12];
+    return { lleno: false, texto: `Sin sesiones en ${MESES_LARGOS[hoy.getMonth()]}, ya disponible ${mesSiguiente}` };
+  }
+
+  return { lleno: true, texto: mensajeSinSesionesEsteMes(evento) };
 }
 
 // Busca el próximo mes (hasta 12 meses adelante, respetando FechaFin) que sí
@@ -2196,6 +2212,7 @@ function renderAdminPanel() {
     document.querySelectorAll(".admin-ev-cupo-btn").forEach(btn => {
       btn.addEventListener("click", () => {
         adminState.evento = activos.find(e => e.eventoid === btn.getAttribute("data-id"));
+        adminState.mesCupo = null;
         adminState.paso = "cupo_sesiones";
         renderAdminPanel();
       });
@@ -2206,24 +2223,35 @@ function renderAdminPanel() {
 
   // ---- Cupo del mes por evento: lista de sesiones del mes con su cupo ----
   if (adminState.paso === "cupo_sesiones") {
+    adminState.mesCupo = adminState.mesCupo || new Date().toISOString().slice(0, 7);
     const ev = adminState.evento;
-    const fechas = esRecurrente(ev) ? ocurrenciasDelMesActual(ev).map(f => fechaISO(f)) : (tieneFechaDefinida(ev) ? [ev.fecha] : []);
+    const fechas = esRecurrente(ev)
+      ? ocurrenciasEnMesEspecifico(ev, adminState.mesCupo).map(f => fechaISO(f))
+      : (tieneFechaDefinida(ev) && ev.fecha.slice(0, 7) === adminState.mesCupo ? [ev.fecha] : []);
     body.innerHTML = `
       <p class="text-sm font-bold text-slate-800 mb-1">${escapeHtml(ev.nombre)}</p>
-      <p class="text-xs text-slate-500 mb-3">Sesiones de este mes y su cupo — toca una para ver quién está registrado.</p>
-      <div class="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
+      <p class="text-xs text-slate-500 mb-2">Sesiones y su cupo — toca una para ver quién está registrado.</p>
+      <div class="flex items-center justify-between mb-2 bg-slate-50 border border-slate-100 rounded-lg px-2 py-1.5">
+        <button id="adminBtnMesCupoAnterior" class="px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-xs transition">← Mes ant.</button>
+        <span class="text-xs font-bold text-slate-700">${adminState.mesCupo}</span>
+        <button id="adminBtnMesCupoSiguiente" class="px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-xs transition">Mes sig. →</button>
+      </div>
+      <div class="space-y-2 max-h-[45vh] overflow-y-auto pr-1">
         ${fechas.length ? fechas.map(f => {
           const info = cupoInfo(ev, f);
           const fechaDate = parseFechaLocal(f);
           const nombreDia = DIAS_SEMANA_LARGOS[fechaDate.getDay()];
+          const actividad = actividadDelDia(ev, fechaDate);
           return `<button class="admin-sesion-btn w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-3 py-2.5 transition" data-fecha="${f}">
-            <span class="font-bold text-slate-800 text-sm block">${nombreDia.slice(0, 3)} ${formatearFecha(fechaDate)}</span>
+            <span class="font-bold text-slate-800 text-sm block">${nombreDia.slice(0, 3)} ${formatearFecha(fechaDate)}${actividad ? ` — ${escapeHtml(actividad)}` : ""}</span>
             <span class="text-xs font-bold ${info.lleno ? "text-red-500" : "text-emerald-600"}">${info.lleno ? "🔴" : "🟢"} ${info.texto}</span>
           </button>`;
-        }).join("") : `<p class="text-xs text-slate-400">${mensajeSinSesionesEsteMes(ev)}.</p>`}
+        }).join("") : `<p class="text-xs text-slate-400">Sin sesiones en ${adminState.mesCupo}.</p>`}
       </div>
       <button id="adminBtnVolverEventoCupo" class="w-full mt-3 bg-white border border-slate-200 text-slate-600 text-sm font-bold rounded-lg py-2 transition">← Volver</button>
     `;
+    document.getElementById("adminBtnMesCupoAnterior").addEventListener("click", () => cambiarMesCupo(-1));
+    document.getElementById("adminBtnMesCupoSiguiente").addEventListener("click", () => cambiarMesCupo(1));
     document.querySelectorAll(".admin-sesion-btn").forEach(btn => {
       btn.addEventListener("click", () => {
         adminState.fechaSesionCupo = btn.getAttribute("data-fecha");
@@ -2632,6 +2660,23 @@ async function accionRegistroAdmin(registroId, accion) {
 }
 
 // ---------- Asistencias del mes ----------
+// Ocurrencias de un evento recurrente dentro de un mes ESPECÍFICO (a diferencia
+// de ocurrenciasDelMesActual, que siempre es relativo a "hoy") — para poder
+// navegar el panel de Cupo mes por mes, incluyendo meses ya pasados.
+function ocurrenciasEnMesEspecifico(evento, mesStr) {
+  const [y, m] = mesStr.split("-").map(Number);
+  const inicioMes = new Date(y, m - 1, 1, 12, 0, 0);
+  const finMes = new Date(y, m, 0, 12, 0, 0);
+  return generarOcurrenciasEnRango(evento, inicioMes, finMes);
+}
+
+function cambiarMesCupo(delta) {
+  const [y, m] = adminState.mesCupo.split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  adminState.mesCupo = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  renderAdminPanel();
+}
+
 function cambiarMesAsistencia(delta) {
   const [y, m] = adminState.mesSeleccionado.split("-").map(Number);
   const d = new Date(y, m - 1 + delta, 1);
@@ -2686,8 +2731,6 @@ function renderListaAsistenciasMes() {
         <div class="flex gap-1.5 mt-1 flex-wrap">
           <button class="btnAsistioSi ${r.asistio === "Si" ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-700"} hover:bg-emerald-600 hover:text-white text-[11px] font-bold rounded-lg px-2 py-1.5 transition" data-id="${r.registroId}">✅ Asistió</button>
           <button class="btnAsistioNo ${r.asistio === "No" ? "bg-red-600 text-white" : "bg-red-50 text-red-700"} hover:bg-red-600 hover:text-white text-[11px] font-bold rounded-lg px-2 py-1.5 transition" data-id="${r.registroId}">❌ No asistió</button>
-          <button class="btnBajaAdmin bg-slate-700 hover:bg-slate-800 text-white text-[11px] font-bold rounded-lg px-2 py-1.5 transition" data-id="${r.registroId}">🗑️ Dar de baja</button>
-          <button class="btnBloquearAdmin bg-red-700 hover:bg-red-800 text-white text-[11px] font-bold rounded-lg px-2 py-1.5 transition" data-depto="${escapeHtml(r.depto)}" data-nombre="${escapeHtml(r.nombre)}">🚫 Bloquear</button>
         </div>
       </div>
     `).join("");
@@ -2701,38 +2744,18 @@ function renderListaAsistenciasMes() {
     `;
   }).join("");
 
-  document.querySelectorAll(".btnAsistioSi").forEach(btn => btn.addEventListener("click", () => marcarAsistenciaAdmin(btn.getAttribute("data-id"), "Si")));
-  document.querySelectorAll(".btnAsistioNo").forEach(btn => btn.addEventListener("click", () => marcarAsistenciaAdmin(btn.getAttribute("data-id"), "No")));
-  document.querySelectorAll(".btnBajaAdmin").forEach(btn => btn.addEventListener("click", () => darDeBajaRegistroAdmin(btn.getAttribute("data-id"))));
-  document.querySelectorAll(".btnBloquearAdmin").forEach(btn => btn.addEventListener("click", () => bloquearManualAdmin(btn.getAttribute("data-depto"), btn.getAttribute("data-nombre"))));
+  document.querySelectorAll(".btnAsistioSi").forEach(btn => btn.addEventListener("click", () => toggleAsistenciaAdmin(btn.getAttribute("data-id"), "Si")));
+  document.querySelectorAll(".btnAsistioNo").forEach(btn => btn.addEventListener("click", () => toggleAsistenciaAdmin(btn.getAttribute("data-id"), "No")));
 }
 
-async function darDeBajaRegistroAdmin(registroId) {
-  if (!confirm("¿Confirmas dar de baja este registro? El lugar quedará libre de inmediato.")) return;
-  try {
-    const url = `${URL_AGENTE_EVENTOS}?accion=admin_cancelar_registro&pin=${encodeURIComponent(adminState.pin)}&registroId=${encodeURIComponent(registroId)}`;
-    const res = await fetch(url, { cache: "no-store" });
-    const data = await res.json();
-    if (!data.ok) { alert(data.error || "No se pudo dar de baja."); return; }
-    adminState.registrosMes = (adminState.registrosMes || []).filter(r => r.registroId !== registroId);
-    renderListaAsistenciasMes();
-    refrescarRegistrosYCupos();
-  } catch (e) {
-    alert("Error de conexión.");
-  }
-}
-
-async function bloquearManualAdmin(depto, nombre) {
-  if (!confirm(`¿Confirmas bloquear a ${nombre} (depto ${depto}) para nuevos registros a eventos?`)) return;
-  try {
-    const url = `${URL_AGENTE_EVENTOS}?accion=bloquear_manual&pin=${encodeURIComponent(adminState.pin)}&depto=${encodeURIComponent(depto)}&nombre=${encodeURIComponent(nombre)}&motivo=${encodeURIComponent("Bloqueado manualmente desde el panel de asistencias")}`;
-    const res = await fetch(url, { cache: "no-store" });
-    const data = await res.json();
-    if (!data.ok) { alert(data.error || "No se pudo bloquear."); return; }
-    alert(`${nombre} (depto ${depto}) fue bloqueado.`);
-  } catch (e) {
-    alert("Error de conexión.");
-  }
+// Si ya estaba marcado con ese mismo estado, lo quita (deselecciona); si no,
+// lo marca. Así un clic accidental o un cambio de opinión se puede corregir
+// sin tener que marcar el estado contrario.
+function toggleAsistenciaAdmin(registroId, valorClic) {
+  const r = (adminState.registrosMes || []).find(x => x.registroId === registroId);
+  const valorActual = r ? r.asistio : "";
+  const nuevoValor = valorActual === valorClic ? "" : valorClic;
+  marcarAsistenciaAdmin(registroId, nuevoValor);
 }
 
 async function marcarAsistenciaAdmin(registroId, asistio) {
@@ -2758,11 +2781,13 @@ async function cargarRegistrosSesion() {
   if (cont) cont.innerHTML = `<p class="text-xs text-slate-400">Cargando…</p>`;
   try {
     const ev = adminState.evento;
-    const url = `${URL_AGENTE_EVENTOS}?accion=listar_registros_sesion&pin=${encodeURIComponent(adminState.pin)}&eventoId=${encodeURIComponent(ev.eventoid)}&fechaSesion=${encodeURIComponent(adminState.fechaSesionCupo)}`;
+    const fecha = adminState.fechaSesionCupo;
+    const mes = fecha.slice(0, 7);
+    const url = `${URL_AGENTE_EVENTOS}?accion=listar_registros_mes&pin=${encodeURIComponent(adminState.pin)}&mes=${encodeURIComponent(mes)}`;
     const res = await fetch(url, { cache: "no-store" });
     const data = await res.json();
     if (!data.ok) { if (cont) cont.innerHTML = `<p class="text-xs text-red-600">${escapeHtml(data.error || "Error")}</p>`; return; }
-    adminState.registrosSesion = data.registros || [];
+    adminState.registrosSesion = (data.registros || []).filter(r => r.eventoId === ev.eventoid && r.fechaSesion === fecha);
     renderListaCupoSesion();
   } catch (e) {
     if (cont) cont.innerHTML = `<p class="text-xs text-red-600">Error de conexión.</p>`;
@@ -2791,7 +2816,7 @@ function renderListaCupoSesion() {
 async function bajaRegistroDesdeAdmin(registroId) {
   if (!confirm("¿Confirmas dar de baja este registro? El lugar quedará libre de inmediato.")) return;
   try {
-    const url = `${URL_AGENTE_EVENTOS}?accion=baja_registro_admin&pin=${encodeURIComponent(adminState.pin)}&registroId=${encodeURIComponent(registroId)}`;
+    const url = `${URL_AGENTE_EVENTOS}?accion=admin_cancelar_registro&pin=${encodeURIComponent(adminState.pin)}&registroId=${encodeURIComponent(registroId)}`;
     const res = await fetch(url, { cache: "no-store" });
     const data = await res.json();
     if (!data.ok) { alert(data.error || "No se pudo dar de baja."); return; }
