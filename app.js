@@ -14,7 +14,7 @@ const URL_REGISTROS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vShS7
 
 // ⚠️ COPIA AQUÍ EL LINK DE IMPLEMENTACIÓN DE TU GOOGLE APPS SCRIPT (APLICACIÓN WEB /EXEC)
 // Se usa para: registrar asistentes (valida morosos + cupo), panel admin y chat con Gemini.
-const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbxWRpO1hcJvniDsKUbRFFr6rP5HGgnFa0EanV-qTv4i9MpYr9KcqC22xh26TObXAa3j/exec";
+const URL_AGENTE_EVENTOS = "https://script.google.com/macros/s/AKfycbyPYjWgymLfYvGM0R47UAAOD1tRkErHHQjyp9Jnd1d_Fvbemt1F8uKI_GxO-o8woWzs/exec";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGOS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
