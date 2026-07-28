@@ -584,12 +584,36 @@ function crearSeccionMenu(titulo, idLista) {
 // todas las sesiones restantes del mes están llenas, se marca como lleno.
 function infoCupoResumenRecurrente(evento) {
   const ocurrencias = ocurrenciasDelMesActual(evento);
-  if (!ocurrencias.length) return { lleno: true, texto: "Sin sesiones este mes" };
+  if (!ocurrencias.length) return { lleno: true, texto: mensajeSinSesionesEsteMes(evento) };
   for (let i = 0; i < ocurrencias.length; i++) {
     const info = cupoInfo(evento, fechaISO(ocurrencias[i]));
     if (!info.lleno) return { lleno: false, texto: info.sinLimite ? info.texto : `${info.texto} (próx. sesión)` };
   }
   return { lleno: true, texto: "Cupo Lleno" };
+}
+
+// Busca el próximo mes (hasta 12 meses adelante, respetando FechaFin) que sí
+// tenga al menos una sesión, para completar "Sin sesiones este mes" con algo
+// útil como "Sin sesiones en julio, próxima sesión en agosto" en vez de dejarlo
+// ahí sin más contexto.
+function mensajeSinSesionesEsteMes(evento) {
+  const hoy = new Date();
+  const mesActualNombre = MESES_LARGOS[hoy.getMonth()];
+  const finSerie = evento.fechafin ? parseFechaLocal(evento.fechafin) : null;
+
+  for (let i = 1; i <= 12; i++) {
+    const cursor = new Date(hoy.getFullYear(), hoy.getMonth() + i, 1, 12, 0, 0);
+    if (finSerie && cursor > finSerie) break;
+    const inicioMes = new Date(cursor.getFullYear(), cursor.getMonth(), 1, 12, 0, 0);
+    const finMes = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0, 12, 0, 0);
+    const ocurrenciasMes = generarOcurrenciasEnRango(evento, inicioMes, finMes);
+    if (ocurrenciasMes.length) {
+      const nombreMesSiguiente = MESES_LARGOS[cursor.getMonth()];
+      const mismoAnio = cursor.getFullYear() === hoy.getFullYear();
+      return `Sin sesiones en ${mesActualNombre}, próxima sesión en ${nombreMesSiguiente}${mismoAnio ? "" : " " + cursor.getFullYear()}`;
+    }
+  }
+  return `Sin sesiones en ${mesActualNombre} — no hay próximas sesiones programadas`;
 }
 
 
@@ -702,7 +726,7 @@ function tarjetaEventoTexto(evento, incluirBoton = true, fechaSesion = null) {
         }
       });
     } else {
-      lineas.push(`👥 No hay sesiones futuras dentro del rango de esta serie.`);
+      lineas.push(`👥 ${mensajeSinSesionesEsteMes(evento)}.`);
     }
   }
 
@@ -2940,7 +2964,7 @@ function infoEventoParaListaModal(evento) {
     return { lleno: info.lleno, texto: info.texto, fechaTexto: formatearFecha(parseFechaLocal(evento.fecha)) };
   }
   const ocurrencias = ocurrenciasDelMesActual(evento);
-  if (!ocurrencias.length) return { lleno: true, texto: "Sin sesiones este mes", fechaTexto: "Recurrente" };
+  if (!ocurrencias.length) return { lleno: true, texto: mensajeSinSesionesEsteMes(evento), fechaTexto: "Recurrente" };
   const todasLlenas = ocurrencias.every(f => cupoInfo(evento, fechaISO(f)).lleno);
   return { lleno: todasLlenas, texto: todasLlenas ? "Cupo Lleno" : `${ocurrencias.length} sesión(es) este mes`, fechaTexto: "Recurrente" };
 }
@@ -3292,7 +3316,7 @@ function renderFormularioEvento() {
     fechasHtml = `<p class="text-xs text-slate-600 mb-2">📅 Sesión: <strong>${formatearFecha(parseFechaLocal(regModal.fechaUnica))}</strong></p>`;
   } else if (recurrenteSinFecha) {
     if (!regModal.fechasDisponiblesMes.length) {
-      fechasHtml = `<p class="text-xs text-red-600 font-bold mb-2">No hay sesiones disponibles este mes para este evento.</p>`;
+      fechasHtml = `<p class="text-xs text-red-600 font-bold mb-2">${mensajeSinSesionesEsteMes(ev)}.</p>`;
     } else {
       fechasHtml = `<label class="block text-xs font-bold text-slate-500 mb-1">¿A qué fecha(s) te registras este mes?</label><div class="space-y-1 mb-1 max-h-32 overflow-y-auto pr-1">`;
       regModal.fechasDisponiblesMes.forEach(f => {
